@@ -20,7 +20,7 @@ export function normalizeLabel(raw: string): {
 } {
   const cleaned = String(raw ?? "")
     .trim()
-    .replace(/^q(uestion)?[\s.:)_-]*/i, "");
+    .replace(/^(ans(wer)?|q(uestion)?)[\s.:)_-]*/i, "");
   const numMatch = cleaned.match(/\d+/);
   const displayNumber = numMatch ? numMatch[0] : cleaned.replace(/[^\dA-Za-z]/g, "");
   const partMatch = cleaned.match(/\d+\s*[.)\-\s]*\(?([a-z])\)?\b/i);
