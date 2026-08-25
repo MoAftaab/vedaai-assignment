@@ -54,10 +54,29 @@ async function pMap<T, R>(
   return results;
 }
 
-function sanitizeBbox(raw: unknown): BBox | null {
+function sanitizeBbox(raw: unknown, pageMeta?: { w?: number; h?: number }): BBox | null {
   if (!Array.isArray(raw) || raw.length < 4) return null;
-  const nums = raw.slice(0, 4).map((v) => Number(v));
+  let nums = raw.slice(0, 4).map((v) => Number(v));
   if (nums.some((v) => !Number.isFinite(v))) return null;
+
+  // Detect scale: if any value > 1.0, normalize it
+  if (nums.some((v) => v > 1)) {
+    const scaleX = pageMeta?.w && pageMeta.w > 100 ? pageMeta.w : 1000;
+    const scaleY = pageMeta?.h && pageMeta.h > 100 ? pageMeta.h : 1000;
+
+    const [a, b, c, d] = nums;
+    // Check if format is [x1, y1, x2, y2] where c > a and d > b
+    if (c > a && d > b && c > 1 && d > 1 && c > scaleX * 0.4) {
+      const x = a / scaleX;
+      const y = b / scaleY;
+      const w = (c - a) / scaleX;
+      const h = (d - b) / scaleY;
+      nums = [x, y, w, h];
+    } else {
+      nums = [a / scaleX, b / scaleY, c / scaleX, d / scaleY];
+    }
+  }
+
   let [x, y, w, h] = nums;
   x = clamp01(x);
   y = clamp01(y);
@@ -140,7 +159,8 @@ export async function runPipeline(req: ProcessRequest): Promise<AssessmentResult
       );
       used.add(provider);
       return (data?.blocks ?? []).map<PagedBlock>((b) => ({ ...b, page: i }));
-    } catch {
+    } catch (err) {
+      console.error(`Error extracting answers from page ${i}:`, err);
       return [] as PagedBlock[];
     }
   });
@@ -151,7 +171,7 @@ export async function runPipeline(req: ProcessRequest): Promise<AssessmentResult
   blocks.forEach((b, idx) => {
     if (b.label == null) return;
     const q = byLabel.get(normalizeLabel(String(b.label)).label);
-    const bbox = sanitizeBbox(b.bbox);
+    const bbox = sanitizeBbox(b.bbox, aPages[b.page]);
     if (q && bbox) {
       attachRegion(q, { page: b.page, bbox }, b.transcript);
       consumed[idx] = true;
@@ -184,7 +204,7 @@ export async function runPipeline(req: ProcessRequest): Promise<AssessmentResult
         const entry = unlabeled[Number(m[1])];
         if (!entry) continue;
         const q = byLabel.get(normalizeLabel(a.label).label);
-        const bbox = sanitizeBbox(entry.b.bbox);
+        const bbox = sanitizeBbox(entry.b.bbox, aPages[entry.b.page]);
         if (q && bbox && q.status === "unanswered" && !takenLabels.has(q.label)) {
           attachRegion(q, { page: entry.b.page, bbox }, entry.b.transcript);
           consumed[entry.idx] = true;
@@ -200,7 +220,7 @@ export async function runPipeline(req: ProcessRequest): Promise<AssessmentResult
   const unmatched: UnmatchedAnswer[] = [];
   blocks.forEach((b, idx) => {
     if (consumed[idx]) return;
-    const bbox = sanitizeBbox(b.bbox);
+    const bbox = sanitizeBbox(b.bbox, aPages[b.page]);
     if (!bbox) return;
     unmatched.push({
       label: b.label != null ? normalizeLabel(String(b.label)).label : undefined,

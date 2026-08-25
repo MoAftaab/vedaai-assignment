@@ -110,6 +110,15 @@ export function extractJson(raw: string): unknown {
   }
 }
 
+function detectMime(b64: string, fallback: string = "image/jpeg"): string {
+  const clean = b64.trim();
+  if (clean.startsWith("iVBORw0KGgo")) return "image/png";
+  if (clean.startsWith("/9j/")) return "image/jpeg";
+  if (clean.startsWith("UklGR")) return "image/webp";
+  if (clean.startsWith("R0lGOD")) return "image/gif";
+  return fallback;
+}
+
 class LLMClient {
   private settings: Settings;
   // PRIMARY = agentrouter (Claude). Runtime failover handles the rest.
@@ -308,8 +317,9 @@ class LLMClient {
     {
       maxTokens = 4096,
       mime = "image/png",
-    }: { maxTokens?: number; mime?: "image/png" | "image/jpeg" } = {},
+    }: { maxTokens?: number; mime?: string } = {},
   ): Promise<{ text: string; provider: Provider }> {
+    const detectedMime = detectMime(imageBase64, mime);
     // 1) AgentRouter Claude vision (primary).
     try {
       const url = `${this.settings.agentrouterBaseUrl.replace(/\/$/, "")}/v1/messages`;
@@ -321,7 +331,14 @@ class LLMClient {
           {
             role: "user",
             content: [
-              { type: "image", source: { type: "base64", media_type: mime, data: imageBase64 } },
+              {
+                type: "image",
+                source: {
+                  type: "base64",
+                  media_type: detectedMime,
+                  data: imageBase64,
+                },
+              },
               { type: "text", text: userText },
             ],
           },
@@ -329,11 +346,17 @@ class LLMClient {
       };
       const resp = await fetchWithTimeout(
         url,
-        { method: "POST", headers: this.agentrouterHeaders(), body: JSON.stringify(payload) },
+        {
+          method: "POST",
+          headers: this.agentrouterHeaders(),
+          body: JSON.stringify(payload),
+        },
         90_000,
       );
       if (resp.status === 200) {
-        const data = (await resp.json()) as { content?: Array<{ type?: string; text?: string }> };
+        const data = (await resp.json()) as {
+          content?: Array<{ type?: string; text?: string }>;
+        };
         const text = (data.content ?? [])
           .filter((b) => b.type === "text")
           .map((b) => b.text ?? "")
@@ -355,7 +378,12 @@ class LLMClient {
           role: "user",
           content: [
             { type: "text", text: userText },
-            { type: "image_url", image_url: { url: `data:${mime};base64,${imageBase64}` } },
+            {
+              type: "image_url",
+              image_url: {
+                url: `data:${detectedMime};base64,${imageBase64}`,
+              },
+            },
           ],
         },
       ],
@@ -363,12 +391,20 @@ class LLMClient {
     };
     const resp = await fetchWithTimeout(
       url,
-      { method: "POST", headers: this.openaiHeaders(), body: JSON.stringify(payload) },
+      {
+        method: "POST",
+        headers: this.openaiHeaders(),
+        body: JSON.stringify(payload),
+      },
       90_000,
     );
     if (resp.status !== 200)
-      throw new Error(`OpenAI vision HTTP ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
-    const data = (await resp.json()) as { choices: Array<{ message: { content: string } }> };
+      throw new Error(
+        `OpenAI vision HTTP ${resp.status}: ${(await resp.text()).slice(0, 200)}`,
+      );
+    const data = (await resp.json()) as {
+      choices: Array<{ message: { content: string } }>;
+    };
     return { text: data.choices[0].message.content.trim(), provider: "openai" };
   }
 
