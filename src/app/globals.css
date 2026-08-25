@@ -1,26 +1,115 @@
 @import "tailwindcss";
 
+/* ─────────────────────────────────────────────────────────────
+   VedaAI design tokens (extracted from the Figma frame exports)
+   ───────────────────────────────────────────────────────────── */
+@theme {
+  /* Brand orange */
+  --color-brand: #fc4818;
+  --color-brand-hover: #e63d12;
+  --color-brand-300: #fc7854;
+  --color-brand-200: #fcb4a0;
+  --color-brand-100: #fde0d6;
+  --color-brand-50: #fdece6; /* pale highlight behind hero heading */
+
+  /* Ink / text */
+  --color-ink: #1a1a1a; /* primary text + active */
+  --color-ink-70: #55565a; /* secondary text */
+  --color-ink-45: #8a8c91; /* muted / placeholder */
+
+  /* Neutrals */
+  --color-line: #e4e4e4; /* hairline borders */
+  --color-line-strong: #d6d6d6;
+  --color-canvas: #f0f0f0; /* app background */
+  --color-surface: #ffffff; /* cards */
+  --color-surface-2: #f6f6f7; /* inner boxes (feedback) */
+  --color-panel: #262626; /* dark answer-sheet header + number badges */
+  --color-panel-2: #1f1f1f;
+
+  /* Semantic score colors */
+  --color-success: #2fa80c;
+  --color-success-50: #e7f6e1;
+  --color-highlight: #34c759; /* green region highlight on the scan */
+  --color-amber: #e8890c;
+  --color-amber-50: #fceedd;
+  --color-danger: #e5484d;
+  --color-danger-50: #fbe7e7;
+
+  /* Radii */
+  --radius-card: 16px;
+  --radius-pill: 999px;
+
+  --font-sans: var(--font-jakarta), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", sans-serif;
+}
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html,
+body {
+  height: 100%;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Soft light-gray gradient for the main working area (matches the frames) */
+.canvas-gradient {
+  background: radial-gradient(
+    130% 90% at 50% -10%,
+    #fcfcfc 0%,
+    #f5f5f5 46%,
+    #ececec 100%
+  );
+}
+
+/* Slim scrollbar for the question list / scan viewer */
+.scroll-slim {
+  scrollbar-width: thin;
+  scrollbar-color: #d0d0d0 transparent;
+}
+.scroll-slim::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scroll-slim::-webkit-scrollbar-thumb {
+  background: #d0d0d0;
+  border-radius: 999px;
+}
+.scroll-slim::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Light thumb variant for the dark answer-sheet panel */
+.scroll-slim-dark {
+  scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
+}
+.scroll-slim-dark::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+@keyframes veda-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes veda-pulse-ring {
+  0% {
+    transform: scale(0.92);
+    opacity: 0.7;
+  }
+  70% {
+    transform: scale(1.12);
+    opacity: 0;
+  }
+  100% {
+    opacity: 0;
+  }
 }

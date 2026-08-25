@@ -36,6 +36,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# local design reference — the assignment's own Figma exports & brief (company IP, not committed)
+/design-reference/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
