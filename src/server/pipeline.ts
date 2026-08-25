@@ -104,6 +104,9 @@ export async function runPipeline(req: ProcessRequest): Promise<AssessmentResult
   const used = new Set<Provider>();
   const qPages: PageImage[] = req.questionPages ?? [];
   const aPages: PageImage[] = req.answerPages ?? [];
+  // Remembered so a total provider outage produces an actionable message
+  // instead of an empty (but "successful") result.
+  let lastError: string | null = null;
 
   // ── 1. Extract questions (per page, in parallel) ───────────────
   const perPageQuestions = await pMap(qPages, 4, async (pg, i) => {
@@ -116,10 +119,21 @@ export async function runPipeline(req: ProcessRequest): Promise<AssessmentResult
       );
       used.add(provider);
       return data?.questions ?? [];
-    } catch {
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+      console.error(`[pipeline] question page ${i} failed:`, lastError);
       return [];
     }
   });
+
+  // Fail fast: if no provider answered a single vision call, the AI is
+  // unreachable from this server — surface that instead of spending another
+  // 90s per answer page to arrive at an empty screen.
+  if (qPages.length > 0 && !used.has("agentrouter") && !used.has("openai")) {
+    throw new Error(
+      `AI service unreachable from the server. No provider completed a request. Last error: ${lastError ?? "unknown"}`,
+    );
+  }
 
   const questions: Question[] = [];
   const byLabel = new Map<string, Question>();
@@ -148,6 +162,16 @@ export async function runPipeline(req: ProcessRequest): Promise<AssessmentResult
     }
   }
 
+  // No questions at all means there is nothing to display — never render an
+  // empty result as a success.
+  if (questions.length === 0) {
+    throw new Error(
+      lastError
+        ? `No questions could be extracted from the question paper. Last error: ${lastError}`
+        : "No questions could be extracted from the question paper. Try a clearer scan or a higher-resolution page.",
+    );
+  }
+
   // ── 2. Extract handwritten answers + bboxes (per page) ─────────
   const perPageBlocks = await pMap(aPages, 4, async (pg, i) => {
     try {
@@ -160,7 +184,8 @@ export async function runPipeline(req: ProcessRequest): Promise<AssessmentResult
       used.add(provider);
       return (data?.blocks ?? []).map<PagedBlock>((b) => ({ ...b, page: i }));
     } catch (err) {
-      console.error(`Error extracting answers from page ${i}:`, err);
+      lastError = err instanceof Error ? err.message : String(err);
+      console.error(`[pipeline] answer page ${i} failed:`, lastError);
       return [] as PagedBlock[];
     }
   });

@@ -74,6 +74,48 @@ async function fetchWithTimeout(
   }
 }
 
+/**
+ * A 200 response whose body is an anti-bot / WAF challenge (e.g. Aliyun WAF) or
+ * HTML rather than the JSON API payload. agentrouter.org sits behind a WAF that
+ * serves this to datacenter IPs (Vercel, most cloud hosts), so a bare
+ * `status === 200` check is NOT enough — we must confirm the body is real API
+ * JSON, otherwise the app silently accepts a challenge page as a "success".
+ */
+function isBlockedResponse(body: string): boolean {
+  const head = body.slice(0, 300).toLowerCase();
+  return (
+    head.includes("aliyun_waf") ||
+    head.includes("<!doctype html") ||
+    head.includes("<html")
+  );
+}
+
+/**
+ * Turn a raw AgentRouter body into the joined text of its `text` content blocks.
+ * Throws a descriptive error when the body is a WAF challenge or otherwise not
+ * an Anthropic Messages response, so failover reasons show up in logs and in
+ * the error surfaced to the UI.
+ */
+function parseClaudeBody(body: string, label: string): string {
+  if (isBlockedResponse(body))
+    throw new Error(
+      `${label}: blocked by upstream WAF on this host's IP (received an anti-bot challenge page instead of the Claude API response). AgentRouter does not accept requests from this server's network.`,
+    );
+  let data: { content?: Array<{ type?: string; text?: string }> };
+  try {
+    data = JSON.parse(body) as typeof data;
+  } catch {
+    throw new Error(`${label}: non-JSON response — ${body.slice(0, 160)}`);
+  }
+  const text = (data.content ?? [])
+    .filter((b) => b.type === "text")
+    .map((b) => b.text ?? "")
+    .join("\n")
+    .trim();
+  if (!text) throw new Error(`${label}: response contained no text blocks`);
+  return text;
+}
+
 /** Pull the first balanced JSON object/array out of a model response. */
 export function extractJson(raw: string): unknown {
   const text = raw.trim();
@@ -164,7 +206,25 @@ class LLMClient {
           { method: "POST", headers: this.agentrouterHeaders(), body: JSON.stringify(payload) },
           20_000,
         );
-        if (resp.status === 200) return { ok: true, status: 200, message: "OK" };
+        if (resp.status === 200) {
+          const text = await resp.text();
+          // A WAF challenge page also returns 200 — validate the body is real
+          // Claude API JSON, not an anti-bot HTML page.
+          if (isBlockedResponse(text))
+            return {
+              ok: false,
+              status: 200,
+              message:
+                "Blocked by upstream WAF on this host's IP — got a challenge page, not the Claude API.",
+            };
+          try {
+            const j = JSON.parse(text) as { content?: unknown };
+            if (Array.isArray(j.content)) return { ok: true, status: 200, message: "OK" };
+          } catch {
+            /* fall through to the unexpected-body case below */
+          }
+          return { ok: false, status: 200, message: "Unexpected 200 body (not a Claude API response)." };
+        }
         return { ok: false, status: resp.status, message: (await resp.text()).slice(0, 120) };
       } catch (err) {
         if (attempt === 1) return { ok: false, status: 0, message: String(err) };
@@ -189,7 +249,12 @@ class LLMClient {
           { method: "POST", headers: this.openaiHeaders(), body: JSON.stringify(payload) },
           20_000,
         );
-        if (resp.status === 200) return { ok: true, status: 200, message: "OK" };
+        if (resp.status === 200) {
+          const text = await resp.text();
+          if (isBlockedResponse(text))
+            return { ok: false, status: 200, message: "Blocked by a WAF/proxy on this host's IP." };
+          return { ok: true, status: 200, message: "OK" };
+        }
         return { ok: false, status: resp.status, message: (await resp.text()).slice(0, 120) };
       } catch (err) {
         if (attempt === 1) return { ok: false, status: 0, message: String(err) };
@@ -240,12 +305,7 @@ class LLMClient {
     );
     if (resp.status !== 200)
       throw new Error(`AgentRouter HTTP ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
-    const data = (await resp.json()) as { content?: Array<{ type?: string; text?: string }> };
-    return (data.content ?? [])
-      .filter((b) => b.type === "text")
-      .map((b) => b.text ?? "")
-      .join("\n")
-      .trim();
+    return parseClaudeBody(await resp.text(), "AgentRouter text");
   }
 
   private async generateOpenai(
@@ -320,6 +380,7 @@ class LLMClient {
     }: { maxTokens?: number; mime?: string } = {},
   ): Promise<{ text: string; provider: Provider }> {
     const detectedMime = detectMime(imageBase64, mime);
+    let primaryError = "AgentRouter vision: no API key configured";
     // 1) AgentRouter Claude vision (primary).
     try {
       const url = `${this.settings.agentrouterBaseUrl.replace(/\/$/, "")}/v1/messages`;
@@ -354,19 +415,16 @@ class LLMClient {
         90_000,
       );
       if (resp.status === 200) {
-        const data = (await resp.json()) as {
-          content?: Array<{ type?: string; text?: string }>;
+        return {
+          text: parseClaudeBody(await resp.text(), "AgentRouter vision"),
+          provider: "agentrouter",
         };
-        const text = (data.content ?? [])
-          .filter((b) => b.type === "text")
-          .map((b) => b.text ?? "")
-          .join("\n")
-          .trim();
-        return { text, provider: "agentrouter" };
       }
-    } catch {
-      /* fall through to OpenAI */
+      primaryError = `AgentRouter vision HTTP ${resp.status}: ${(await resp.text()).slice(0, 160)}`;
+    } catch (err) {
+      primaryError = err instanceof Error ? err.message : String(err);
     }
+    console.warn(`[llm] Claude vision failed → falling back to OpenAI. ${primaryError}`);
 
     // 2) OpenAI vision (fallback).
     const url = `${this.settings.openaiBaseUrl.replace(/\/$/, "")}/chat/completions`;
@@ -400,7 +458,7 @@ class LLMClient {
     );
     if (resp.status !== 200)
       throw new Error(
-        `OpenAI vision HTTP ${resp.status}: ${(await resp.text()).slice(0, 200)}`,
+        `Both vision providers failed. Claude → ${primaryError} | OpenAI vision HTTP ${resp.status}: ${(await resp.text()).slice(0, 200)}`,
       );
     const data = (await resp.json()) as {
       choices: Array<{ message: { content: string } }>;
