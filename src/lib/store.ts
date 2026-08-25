@@ -86,8 +86,8 @@ export const useStore = create<State>((set, get) => ({
     try {
       const { fileToPages } = await import("./pdf");
       const [questionRendered, answerRendered] = await Promise.all([
-        fileToPages(questionFile.file, 1500),
-        fileToPages(answerFile.file, 1700),
+        fileToPages(questionFile.file, 1200),
+        fileToPages(answerFile.file, 1200),
       ]);
 
       const toPayload = (
@@ -104,7 +104,26 @@ export const useStore = create<State>((set, get) => ({
         }),
       });
 
-      const json = (await res.json()) as ProcessResponse;
+      const text = await res.text();
+      let json: ProcessResponse;
+      try {
+        json = JSON.parse(text) as ProcessResponse;
+      } catch {
+        if (res.status === 413) {
+          throw new Error(
+            "Uploaded file payload exceeded the serverless limit. Please try with fewer or lower-resolution pages.",
+          );
+        }
+        if (res.status === 504) {
+          throw new Error(
+            "Server processing timed out. Please try again with fewer pages.",
+          );
+        }
+        throw new Error(
+          `Server error (HTTP ${res.status}): ${text.slice(0, 150) || "Empty response"}`,
+        );
+      }
+
       if (!res.ok || !json.ok || !json.result) {
         throw new Error(json.error || `Processing failed (HTTP ${res.status})`);
       }

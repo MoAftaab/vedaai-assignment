@@ -7,13 +7,10 @@ if (
   typeof window !== "undefined" &&
   !pdfjsLib.GlobalWorkerOptions.workerSrc
 ) {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-    "pdfjs-dist/build/pdf.worker.min.mjs",
-    import.meta.url,
-  ).toString();
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
 }
 
-const JPEG_QUALITY = 0.82;
+const JPEG_QUALITY = 0.78;
 
 export interface RenderedPage {
   dataUrl: string; // for on-screen display
@@ -45,7 +42,7 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 
 export async function fileToPages(
   file: File,
-  maxEdge = 1600,
+  maxEdge = 1200,
 ): Promise<RenderedPage[]> {
   const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
   return isPdf ? renderPdf(file, maxEdge) : [await renderImage(file, maxEdge)];
