@@ -51,12 +51,14 @@ interface Settings {
 function loadSettings(): Settings {
   return {
     openaiApiKey: process.env.OPENAI_API_KEY ?? "",
-    openaiBaseUrl: process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1",
-    openaiModel: process.env.OPENAI_MODEL ?? "gpt-5.4-mini",
+    openaiBaseUrl:
+      process.env.OPENAI_BASE_URL ??
+      "https://generativelanguage.googleapis.com/v1beta/openai/",
+    openaiModel: process.env.OPENAI_MODEL ?? "gemini-2.5-flash",
     agentrouterApiKey: process.env.AGENTROUTER_API_KEY ?? "",
     agentrouterBaseUrl:
       process.env.AGENTROUTER_BASE_URL ?? "https://agentrouter.org",
-    agentrouterModel: process.env.AGENTROUTER_MODEL ?? "claude-opus-4-8",
+    agentrouterModel: process.env.AGENTROUTER_MODEL ?? "gpt-5.6-sol",
   };
 }
 
