@@ -153,7 +153,7 @@ commit real keys.
 
 1. Push to GitHub (done).
 2. [vercel.com](https://vercel.com) → **New Project** → import this repo.
-   Next.js is auto-detected ([`vercel.json`](vercel.json) pins the framework).
+   Next.js is auto-detected — no extra config needed.
 3. **Settings → Environment Variables:** add `AGENTROUTER_API_KEY` (required) and
    `OPENAI_API_KEY` (optional). The base-URL / model vars are optional overrides.
 4. **Deploy.** The `/api/process` function is configured for a 60s max duration.
