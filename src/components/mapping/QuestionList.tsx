@@ -16,7 +16,7 @@ function AiSummary() {
           <div>
             <p className="text-[13px] text-ink-45">Total score</p>
             <p className="text-[24px] font-extrabold leading-none text-ink">
-              {summary.totalScore}
+              {summary.ungradedCount ? "—" : summary.totalScore}
               <span className="text-[16px] font-semibold text-ink-45">
                 /{summary.maxScore}
               </span>
@@ -34,8 +34,13 @@ function AiSummary() {
         </div>
       </div>
       {summary.overall && (
-        <p className="mt-3 border-t border-line pt-3 text-[13px] leading-relaxed text-ink-70">
-          {summary.overall}
+          <p className="mt-3 border-t border-line pt-3 text-[13px] leading-relaxed text-ink-70">
+            {summary.overall}
+          </p>
+        )}
+      {summary.ungradedCount > 0 && (
+        <p className="mt-2 text-[12px] font-semibold text-amber">
+          Score pending manual review for {summary.ungradedCount} answered question{summary.ungradedCount === 1 ? "" : "s"}.
         </p>
       )}
     </div>
@@ -75,6 +80,8 @@ export default function QuestionList() {
   const questions = useStore((s) => s.result?.questions ?? []);
   const expandedAll = useStore((s) => s.expandedAll);
   const setExpandedAll = useStore((s) => s.setExpandedAll);
+  const reviewCount = questions.filter((q) => q.confidence != null && q.confidence < 0.75).length;
+  const ungradedCount = questions.filter((q) => q.status === "answered" && q.score == null).length;
 
   return (
     <div className="flex h-full flex-col">
@@ -93,6 +100,13 @@ export default function QuestionList() {
       </div>
 
       <div className="scroll-slim flex-1 space-y-3 overflow-y-auto pb-2 pr-1">
+        {(reviewCount > 0 || ungradedCount > 0) && (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-[13px] leading-relaxed text-amber">
+            <span className="font-bold">Review recommended.</span>{" "}
+            {reviewCount > 0 && `${reviewCount} answer${reviewCount === 1 ? "" : "s"} need${reviewCount === 1 ? "s" : ""} a confidence check.`}{" "}
+            {ungradedCount > 0 && "Some answers were not graded because Gemini grading was unavailable."}
+          </div>
+        )}
         <AiSummary />
         {questions.map((q) => (
           <QuestionCard key={q.id} q={q} />

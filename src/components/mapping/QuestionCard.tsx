@@ -9,6 +9,7 @@ export default function QuestionCard({ q }: { q: Question }) {
   const expanded = useStore((s) => !!s.expanded[q.id]);
   const selectQuestion = useStore((s) => s.selectQuestion);
   const toggleExpanded = useStore((s) => s.toggleExpanded);
+  const needsReview = q.confidence != null && q.confidence < 0.75;
 
   return (
     <div
@@ -54,6 +55,12 @@ export default function QuestionCard({ q }: { q: Question }) {
           <ScoreChip q={q} />
         </span>
 
+        {needsReview && (
+          <span className="mt-1 hidden rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-bold text-amber sm:inline-flex">
+            Review
+          </span>
+        )}
+
         <button
           type="button"
           onClick={(e) => {
@@ -74,10 +81,22 @@ export default function QuestionCard({ q }: { q: Question }) {
       {expanded && (
         <div className="px-4 pb-4">
           <div className="rounded-xl bg-surface-2 p-4">
-            <p className="text-[14px] font-bold text-ink">AI Feedback</p>
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-[14px] font-bold text-ink">AI Feedback</p>
+              {q.confidence != null && (
+                <span className="text-[11px] font-semibold text-ink-45">
+                  {Math.round(q.confidence * 100)}% extraction confidence
+                </span>
+              )}
+            </div>
             <p className="mt-1.5 text-[14px] leading-relaxed text-ink-70">
               {q.feedback || "No feedback available for this question."}
             </p>
+            {needsReview && (
+              <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-[12px] font-semibold leading-relaxed text-amber">
+                Gemini is less certain about this mapping or highlight. Check the answer region before using the score.
+              </p>
+            )}
           </div>
         </div>
       )}

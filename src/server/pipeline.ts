@@ -24,11 +24,13 @@ interface RawQuestion {
   label: string;
   text: string;
   maxScore: number | null;
+  confidence?: number;
 }
 interface RawBlock {
   label: string | null;
   transcript: string;
   bbox: unknown;
+  confidence?: number;
 }
 type PagedBlock = { label: string | null; transcript: string; bbox: unknown; page: number };
 
@@ -85,12 +87,16 @@ function sanitizeBbox(raw: unknown, pageMeta?: { w?: number; h?: number }): BBox
   return [x, y, w, h];
 }
 
-function attachRegion(q: Question, region: Region, transcript: string) {
+function attachRegion(q: Question, region: Region, transcript: string, confidence?: number) {
   if (!q.answer) q.answer = { transcript: "", regions: [] };
   q.answer.regions.push(region);
   const t = (transcript || "").trim();
   if (t) q.answer.transcript = q.answer.transcript ? `${q.answer.transcript}\n${t}` : t;
   q.status = "answered";
+  if (confidence != null && Number.isFinite(confidence)) {
+    q.confidence = q.confidence == null ? confidence : Math.min(q.confidence, confidence);
+    q.answer.confidence = q.confidence;
+  }
 }
 
 function pickProvider(used: Set<Provider>): Provider {
@@ -155,6 +161,7 @@ export async function runPipeline(req: ProcessRequest): Promise<AssessmentResult
         text: (rq.text || "").trim(),
         maxScore: typeof rq.maxScore === "number" && rq.maxScore > 0 ? rq.maxScore : 0,
         status: "unanswered",
+        confidence: typeof rq.confidence === "number" ? clamp01(rq.confidence) : undefined,
       };
       byLabel.set(norm.label, q);
       questions.push(q);
@@ -197,7 +204,7 @@ export async function runPipeline(req: ProcessRequest): Promise<AssessmentResult
     const q = byLabel.get(normalizeLabel(String(b.label)).label);
     const bbox = sanitizeBbox(b.bbox, aPages[b.page]);
     if (q && bbox) {
-      attachRegion(q, { page: b.page, bbox }, b.transcript);
+      attachRegion(q, { page: b.page, bbox }, b.transcript, typeof b.confidence === "number" ? clamp01(b.confidence) : undefined);
       consumed[idx] = true;
     }
   });
@@ -217,7 +224,7 @@ export async function runPipeline(req: ProcessRequest): Promise<AssessmentResult
         })),
       };
       const { data, provider } = await llm.generateJson<{
-        assignments: { id: string; label: string | null; continuation?: boolean }[];
+        assignments: { id: string; label: string | null; continuation?: boolean; confidence?: number }[];
       }>(MAPPING_SYSTEM, JSON.stringify(mapInput), { maxTokens: 1024 });
       used.add(provider);
       const takenLabels = new Set<string>();
@@ -231,7 +238,7 @@ export async function runPipeline(req: ProcessRequest): Promise<AssessmentResult
         const bbox = sanitizeBbox(entry.b.bbox, aPages[entry.b.page]);
         const isContinuation = a.continuation === true && q?.status === "answered";
         if (q && bbox && (q.status === "unanswered" || isContinuation) && (isContinuation || !takenLabels.has(q.label))) {
-          attachRegion(q, { page: entry.b.page, bbox }, entry.b.transcript);
+          attachRegion(q, { page: entry.b.page, bbox }, entry.b.transcript, typeof a.confidence === "number" ? clamp01(a.confidence) : undefined);
           consumed[entry.idx] = true;
           takenLabels.add(q.label);
         }
@@ -251,6 +258,7 @@ export async function runPipeline(req: ProcessRequest): Promise<AssessmentResult
       label: b.label != null ? normalizeLabel(String(b.label)).label : undefined,
       transcript: (b.transcript || "").trim(),
       regions: [{ page: b.page, bbox }],
+      confidence: typeof b.confidence === "number" ? clamp01(b.confidence) : undefined,
     });
   });
 
@@ -289,17 +297,17 @@ export async function runPipeline(req: ProcessRequest): Promise<AssessmentResult
   } catch {
     for (const q of questions) {
       if (q.maxScore <= 0) q.maxScore = 5;
-      q.score = q.status === "answered" ? Math.round(q.maxScore * 0.6) : 0;
-      q.feedback =
-        q.status === "answered"
-          ? "Answer recorded (automatic grading was unavailable)."
-          : "No answer was attempted for this question.";
+      q.score = q.status === "unanswered" ? 0 : undefined;
+      q.feedback = q.status === "answered"
+        ? "Answer recorded, but Gemini grading was unavailable. Review manually before assigning marks."
+        : "No answer was attempted for this question.";
     }
   }
 
   const maxScore = questions.reduce((s, q) => s + (q.maxScore || 0), 0);
   const totalScore = questions.reduce((s, q) => s + (q.score || 0), 0);
   const answeredCount = questions.filter((q) => q.status === "answered").length;
+  const ungradedCount = questions.filter((q) => q.status === "answered" && q.score == null).length;
 
   return {
     questions,
@@ -310,6 +318,7 @@ export async function runPipeline(req: ProcessRequest): Promise<AssessmentResult
       answeredCount,
       totalScore,
       maxScore,
+      ungradedCount,
       overall,
     },
     provider: pickProvider(used),

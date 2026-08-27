@@ -16,7 +16,8 @@ Two folders, one file to drop into each uploader on the **Upload** screen:
 For a more demanding test, use [`challenge-case/`](challenge-case/). It contains
 a 2-page question paper and 3-page answer sheet with subparts, out-of-order
 answers, an unanswered question, an unmatched answer, and a multi-page answer
-continuation.
+continuation. It also includes a hand-drawn labelled water-cycle diagram for
+testing diagram transcription and highlighting.
 
 These samples are deliberately crafted to exercise **every edge case** the
 assignment calls out. After you click **Start Mapping**, you should see:

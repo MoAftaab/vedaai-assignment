@@ -15,6 +15,7 @@ export interface Region {
 export interface Answer {
   transcript: string;
   regions: Region[];
+  confidence?: number;
 }
 
 export interface Question {
@@ -28,6 +29,7 @@ export interface Question {
   answer?: Answer;
   score?: number; // 0..maxScore
   feedback?: string;
+  confidence?: number;
 }
 
 /** A transcribed answer block that could not be matched to any question. */
@@ -35,6 +37,7 @@ export interface UnmatchedAnswer {
   label?: string; // label written on the sheet, if any (e.g. "Q7")
   transcript: string;
   regions: Region[];
+  confidence?: number;
 }
 
 export interface PageMeta {
@@ -51,6 +54,7 @@ export interface AssessmentResult {
     answeredCount: number;
     totalScore: number;
     maxScore: number;
+    ungradedCount: number;
     overall: string;
   };
   provider: Provider;

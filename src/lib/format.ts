@@ -58,6 +58,7 @@ export function scoreChipClasses(state: ScoreState): string {
 }
 
 export function questionScoreLabel(q: Question): string {
-  if (q.status === "unanswered" || q.score == null) return `0/${q.maxScore}`;
+  if (q.status === "unanswered") return `0/${q.maxScore}`;
+  if (q.score == null) return "—";
   return `${q.score}/${q.maxScore}`;
 }

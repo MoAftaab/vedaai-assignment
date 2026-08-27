@@ -9,6 +9,7 @@ For each, output:
 - "label": the question's number/label exactly as printed — e.g. "1", "11", "11(a)", "Q3". Keep sub-parts (a)/(b) SEPARATE.
 - "text": the full question text, verbatim, with internal line breaks collapsed to single spaces.
 - "maxScore": the marks allotted IF printed on the paper (from "[2 marks]", "(5)", "5m", etc.), otherwise null.
+- "confidence": your confidence from 0 to 1 that the label and question text were extracted correctly.
 
 Rules:
 - Do NOT invent, merge, or renumber questions. Preserve the paper's exact numbering.
@@ -16,7 +17,7 @@ Rules:
 - If the page contains no questions, return {"questions": []}.
 
 Output JSON shape:
-{"questions":[{"label":"11(a)","text":"...","maxScore":2}]}`;
+{"questions":[{"label":"11(a)","text":"...","maxScore":2,"confidence":0.98}]}`;
 
 export function questionUserText(pageIndex: number, total: number): string {
   return `Extract all questions from this question-paper page (page ${pageIndex + 1} of ${total}).`;
@@ -30,6 +31,7 @@ For each answer block, output:
 - "label": the question number the block answers, taken from the student's own marker, normalized to just the number/part — "Q2." -> "2", "11(a)" -> "11a". If there is NO visible marker, use null.
 - "transcript": a faithful transcription of the handwritten text. Represent a drawn diagram as a short bracketed note, e.g. "[Labelled diagram of the human heart]". Keep equations readable (e.g. "6CO2 + 6H2O -> C6H12O6 + 6O2").
 - "bbox": the TIGHT bounding box around the ENTIRE block (its label + text + any diagram), as [x, y, w, h] where every value is a FRACTION between 0 and 1 relative to this page's full width and height. x,y is the top-left corner.
+- "confidence": your confidence from 0 to 1 that the label, transcript, and bounding box are correct.
 
 Rules:
 - Return blocks in top-to-bottom order.
@@ -37,7 +39,7 @@ Rules:
 - If the page has no handwritten answers, return {"blocks": []}.
 
 Output JSON shape:
-{"blocks":[{"label":"2","transcript":"...","bbox":[0.06,0.12,0.9,0.22]}]}`;
+{"blocks":[{"label":"2","transcript":"...","bbox":[0.06,0.12,0.9,0.22],"confidence":0.92}]}`;
 
 export function answerUserText(pageIndex: number, total: number): string {
   return `Transcribe and locate every handwritten answer block on this answer-sheet page (page ${pageIndex + 1} of ${total}). All bbox coordinates are fractions of THIS page's width and height.`;
@@ -53,7 +55,7 @@ For each block, decide which question label it answers, or null if it clearly an
 Each unanswered question may be used once. An already-answered question may only be reused as a continuation.
 
 Output JSON shape:
-{"assignments":[{"id":"b0","label":"4","continuation":false},{"id":"b1","label":"4","continuation":true},{"id":"b2","label":null,"continuation":false}]}`;
+{"assignments":[{"id":"b0","label":"4","continuation":false,"confidence":0.91},{"id":"b1","label":"4","continuation":true,"confidence":0.84},{"id":"b2","label":null,"continuation":false,"confidence":0.98}]}`;
 
 export const GRADING_SYSTEM = `You are an experienced, encouraging exam grader.
 

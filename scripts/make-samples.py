@@ -89,8 +89,8 @@ def build_question_paper():
         ("3.", "Define photosynthesis in your own words.", "[3]"),
         ("4.", "State Newton's First Law of Motion.", "[3]"),
         ("5.", "Answer the following:", ""),
-        ("(a)", "Write the chemical formula for water.", "[1]"),
-        ("(b)", "Write the chemical formula for common table salt.", "[1]"),
+        ("5(a)", "Write the chemical formula for water.", "[1]"),
+        ("5(b)", "Write the chemical formula for common table salt.", "[1]"),
         ("6.", "Briefly explain the stages of the water cycle.", "[3]"),
     ]
     for num, text, marks in questions:
@@ -188,11 +188,12 @@ def build_challenge_set():
         ("3.", "Calculate 18 x 7 and show your working.", "[2]"),
         ("4.", "What is the function of red blood cells?", "[2]"),
         ("5.", "Answer the following:", ""),
-        ("(a)", "Write one property of acids.", "[1]"),
-        ("(b)", "Write one property of bases.", "[1]"),
+        ("5(a)", "Write one property of acids.", "[1]"),
+        ("5(b)", "Write one property of bases.", "[1]"),
         ("6.", "Describe the water cycle in detail.", "[4]"),
         ("7.", "State one cause of soil erosion.", "[1]"),
         ("8.", "Name one layer of the Earth's atmosphere.", "[1]"),
+        ("9.", "Draw a labelled diagram of the water cycle.", "[3]"),
     ]
     q_pages = []
     for page_no, page_questions in enumerate((questions[:5], questions[5:]), 1):
@@ -226,8 +227,7 @@ def build_challenge_set():
          ("Ans 5(b).", "Bases feel soapy and turn red litmus paper blue.")],
         [("Ans 3.", "18 x 7 = 126. First 18 x 5 = 90, then 18 x 2 = 36, so 90 + 36 = 126."),
          ("Ans 1.", "The Moon is lit by the Sun. As it orbits Earth, we see different amounts of its bright half."),
-         ("Ans 7.", "Cutting down trees can cause soil erosion."),
-         ("Ans 9.", "This answer has no matching question and should appear as unmatched.")],
+         ("Ans 7.", "Cutting down trees can cause soil erosion.")],
         [("Ans 6.", "Water evaporates because of the Sun's heat and rises as vapour. It cools and forms clouds."),
          ("", "When clouds become heavy, precipitation falls as rain. Water collects in rivers and oceans, and the cycle repeats.")],
     ]
@@ -238,6 +238,23 @@ def build_challenge_set():
         y = MARGIN_T + 150
         for num, text in blocks:
             y = hand_block(d, MARGIN_L + 24, y, num, text, max_w)
+        if page_no == 2:
+            y += 18
+            d.text((MARGIN_L + 24, y), "Ans 9.", font=F_HAND, fill=(20, 30, 90))
+            y += 62
+            # A simple labelled diagram intentionally tests non-text answer extraction.
+            cx = MARGIN_L + 330
+            d.ellipse((cx - 90, y + 80, cx + 90, y + 260), outline=(26, 40, 110), width=4)
+            d.text((cx - 48, y + 145), "ocean", font=F_HAND_SM, fill=(26, 40, 110))
+            d.arc((cx - 180, y - 10, cx + 180, y + 190), 195, 345, fill=(26, 40, 110), width=4)
+            d.text((cx + 160, y + 50), "evaporation", font=F_HAND_SM, fill=(26, 40, 110))
+            d.rectangle((cx - 110, y - 100, cx + 110, y - 20), outline=(26, 40, 110), width=4)
+            d.text((cx - 64, y - 84), "clouds", font=F_HAND_SM, fill=(26, 40, 110))
+            d.line((cx - 35, y - 18, cx - 65, y + 70), fill=(26, 40, 110), width=4)
+            d.text((cx - 300, y + 10), "rain", font=F_HAND_SM, fill=(26, 40, 110))
+            d.arc((cx - 250, y + 20, cx - 10, y + 250), 20, 170, fill=(26, 40, 110), width=4)
+            y += 310
+            y = hand_block(d, MARGIN_L + 24, y, "Ans 10.", "This answer has no matching question and should appear as unmatched.", max_w)
         path = os.path.join(a_dir, f"answer-sheet-page-{page_no}.png")
         img.save(path, "PNG")
         answer_pages.append(img)
