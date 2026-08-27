@@ -68,7 +68,7 @@ function UnmatchedSection() {
             {u.label && (
               <span className="mr-1.5 font-semibold text-ink">{u.label}:</span>
             )}
-            {u.transcript || "(diagram / non-text region)"}
+            {u.transcript || u.visualDescription || "(diagram / non-text region)"}
           </li>
         ))}
       </ul>

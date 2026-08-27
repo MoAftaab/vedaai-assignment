@@ -12,32 +12,40 @@ import type {
 import { normalizeLabel } from "@/lib/format";
 import { getLLM } from "./llm/client";
 import {
+  ANSWER_RESPONSE_SCHEMA,
+  FINAL_ASSESSMENT_RESPONSE_SCHEMA,
+  QUESTION_RESPONSE_SCHEMA,
+} from "./schemas";
+import {
   ANSWER_EXTRACTION_SYSTEM,
   answerUserText,
-  GRADING_SYSTEM,
-  MAPPING_SYSTEM,
+  FINAL_ASSESSMENT_SYSTEM,
   QUESTION_EXTRACTION_SYSTEM,
-  questionUserText,
+  questionBatchUserText,
 } from "./prompts";
 
 interface RawQuestion {
+  page: number;
   label: string;
   text: string;
   maxScore: number | null;
   confidence?: number;
 }
 interface RawBlock {
+  page: number;
   label: string | null;
   transcript: string;
+  visualDescription?: string;
   bbox: unknown;
   confidence?: number;
+  labelConfidence?: number;
 }
-type PagedBlock = { label: string | null; transcript: string; bbox: unknown; confidence?: number; page: number };
+type PagedBlock = { label: string | null; transcript: string; visualDescription?: string; bbox: unknown; confidence?: number; labelConfidence?: number; page: number };
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const clamp01 = (v: number) => clamp(v, 0, 1);
 
-/** Bounded-concurrency map. */
+/** Bounded-concurrency map for independent page extraction calls. */
 async function pMap<T, R>(
   items: T[],
   limit: number,
@@ -56,30 +64,28 @@ async function pMap<T, R>(
   return results;
 }
 
-function sanitizeBbox(raw: unknown, pageMeta?: { w?: number; h?: number }): BBox | null {
+function sanitizeBbox(raw: unknown): BBox | null {
   if (!Array.isArray(raw) || raw.length < 4) return null;
-  let nums = raw.slice(0, 4).map((v) => Number(v));
+  const nums = raw.slice(0, 4).map((v) => Number(v));
   if (nums.some((v) => !Number.isFinite(v))) return null;
 
-  // Detect scale: if any value > 1.0, normalize it
-  if (nums.some((v) => v > 1)) {
-    const scaleX = pageMeta?.w && pageMeta.w > 100 ? pageMeta.w : 1000;
-    const scaleY = pageMeta?.h && pageMeta.h > 100 ? pageMeta.h : 1000;
-
-    const [a, b, c, d] = nums;
-    // Check if format is [x1, y1, x2, y2] where c > a and d > b
-    if (c > a && d > b && c > 1 && d > 1 && c > scaleX * 0.4) {
-      const x = a / scaleX;
-      const y = b / scaleY;
-      const w = (c - a) / scaleX;
-      const h = (d - b) / scaleY;
-      nums = [x, y, w, h];
-    } else {
-      nums = [a / scaleX, b / scaleY, c / scaleX, d / scaleY];
-    }
+  // New contract: Gemini's documented [ymin, xmin, ymax, xmax] box in 0..1000.
+  // Keep support for old saved results that used [x, y, width, height] in 0..1.
+  let x: number;
+  let y: number;
+  let w: number;
+  let h: number;
+  if (nums.every((value) => value >= 0 && value <= 1)) {
+    [x, y, w, h] = nums;
+  } else {
+    const [ymin, xmin, ymax, xmax] = nums;
+    if (ymax <= ymin || xmax <= xmin || nums.some((value) => value < 0 || value > 1000)) return null;
+    x = xmin / 1000;
+    y = ymin / 1000;
+    w = (xmax - xmin) / 1000;
+    h = (ymax - ymin) / 1000;
   }
-
-  let [x, y, w, h] = nums;
+  if (x < 0 || y < 0 || x >= 1 || y >= 1) return null;
   x = clamp01(x);
   y = clamp01(y);
   w = clamp(w, 0.01, 1 - x);
@@ -87,11 +93,17 @@ function sanitizeBbox(raw: unknown, pageMeta?: { w?: number; h?: number }): BBox
   return [x, y, w, h];
 }
 
-function attachRegion(q: Question, region: Region, transcript: string, confidence?: number) {
+function attachRegion(q: Question, region: Region, transcript: string, confidence?: number, visualDescription?: string) {
   if (!q.answer) q.answer = { transcript: "", regions: [] };
   q.answer.regions.push(region);
   const t = (transcript || "").trim();
   if (t) q.answer.transcript = q.answer.transcript ? `${q.answer.transcript}\n${t}` : t;
+  const visual = (visualDescription || "").trim();
+  if (visual && visual.toLowerCase() !== "none") {
+    q.answer.visualDescription = q.answer.visualDescription
+      ? `${q.answer.visualDescription}; ${visual}`
+      : visual;
+  }
   q.status = "answered";
   if (confidence != null && Number.isFinite(confidence)) {
     q.confidence = q.confidence == null ? confidence : Math.min(q.confidence, confidence);
@@ -113,23 +125,26 @@ export async function runPipeline(req: ProcessRequest): Promise<AssessmentResult
   // instead of an empty (but "successful") result.
   let lastError: string | null = null;
 
-  // ── 1. Extract questions (per page, in parallel) ───────────────
-  const perPageQuestions = await pMap(qPages, 4, async (pg, i) => {
-    try {
-      const { data, provider } = await llm.visionJson<{ questions: RawQuestion[] }>(
-        pg.base64,
-        QUESTION_EXTRACTION_SYSTEM,
-        questionUserText(i, qPages.length),
-        { mime: pg.mime, maxTokens: 4096 },
-      );
-      used.add(provider);
-      return data?.questions ?? [];
-    } catch (err) {
-      lastError = err instanceof Error ? err.message : String(err);
-      console.error(`[pipeline] question page ${i} failed:`, lastError);
-      return [];
+  // ── 1. Extract questions (one multimodal batch) ─────────────────
+  // Keeping all question pages in the same context helps Gemini preserve
+  // numbering and sub-parts that wrap across a page boundary.
+  const perPageQuestions: RawQuestion[][] = Array.from({ length: qPages.length }, () => []);
+  try {
+    const { data, provider } = await llm.visionJsonMulti<{ questions: RawQuestion[] }>(
+      qPages.map((page) => ({ base64: page.base64, mime: page.mime })),
+      QUESTION_EXTRACTION_SYSTEM,
+      questionBatchUserText(qPages.length),
+      { maxTokens: 6000, responseSchema: QUESTION_RESPONSE_SCHEMA },
+    );
+    used.add(provider);
+    for (const question of data?.questions ?? []) {
+      const page = Number(question.page);
+      if (Number.isInteger(page) && page >= 0 && page < qPages.length) perPageQuestions[page].push(question);
     }
-  });
+  } catch (err) {
+    lastError = err instanceof Error ? err.message : String(err);
+    console.error("[pipeline] question extraction failed:", lastError);
+  }
 
   // Fail fast: if Gemini did not answer a single vision call, the AI is
   // unreachable from this server — surface that instead of spending another
@@ -178,74 +193,113 @@ export async function runPipeline(req: ProcessRequest): Promise<AssessmentResult
     );
   }
 
-  // ── 2. Extract handwritten answers + bboxes (per page) ─────────
+  // ── 2. Extract handwritten answers + bboxes (per physical page) ─
+  // Page-scoped extraction preserves separate regions for answers that continue
+  // onto another page. The final multimodal call below reconnects those blocks.
+  let answerPageFailures = 0;
   const perPageBlocks = await pMap(aPages, 4, async (pg, i) => {
     try {
       const { data, provider } = await llm.visionJson<{ blocks: RawBlock[] }>(
         pg.base64,
         ANSWER_EXTRACTION_SYSTEM,
-        answerUserText(i, aPages.length),
-        { mime: pg.mime, maxTokens: 4096 },
+        answerUserText(i, aPages.length, questions.map((q) => ({ label: q.label, text: q.text }))),
+        { mime: pg.mime, maxTokens: 4096, responseSchema: ANSWER_RESPONSE_SCHEMA },
       );
       used.add(provider);
-      return (data?.blocks ?? []).map<PagedBlock>((b) => ({ ...b, page: i }));
+      return (data?.blocks ?? []).map<PagedBlock>((block) => ({ ...block, page: i }));
     } catch (err) {
+      answerPageFailures += 1;
       lastError = err instanceof Error ? err.message : String(err);
       console.error(`[pipeline] answer page ${i} failed:`, lastError);
       return [] as PagedBlock[];
     }
   });
+  if (aPages.length > 0 && answerPageFailures === aPages.length) {
+    throw new Error(
+      `Gemini could not read any answer-sheet pages. Last error: ${lastError ?? "unknown"}`,
+    );
+  }
   const blocks: PagedBlock[] = perPageBlocks.flat();
   const consumed = new Array<boolean>(blocks.length).fill(false);
 
-  // ── 3. Cross-check every block before mapping ──────────────────
-  // The vision model can misread a handwritten marker (e.g. "Ans 4" as "2").
-  // Send labeled blocks through the semantic matcher too; the marker is evidence,
-  // not an unconditional mapping instruction.
+  // ── 3. Final multimodal reconciliation + grading ─────────────────
+  // One final call sees the original pages and all extracted blocks at once.
+  // It first assigns blocks, then grades those assignments, preventing mapping
+  // and grading from using different or stale interpretations of the image.
   const candidates = blocks.map((b, idx) => ({ b, idx }));
   const candidateQuestions = questions;
-  if (candidates.length && candidateQuestions.length) {
+  let finalSucceeded = false;
+  let overall = "";
+  let grades = new Map<string, { maxScore: number; score: number; feedback: string }>();
+  if (candidateQuestions.length) {
     try {
-      const mapInput = {
-        questions: candidateQuestions.map((q) => ({ label: q.label, text: q.text, alreadyAnswered: q.status === "answered" })),
+      const finalInput = {
+        questions: candidateQuestions.map((q) => ({ label: q.label, text: q.text, maxScore: q.maxScore || 0 })),
         blocks: candidates.map(({ b }, i) => ({
           id: `b${i}`,
-          observedLabel: b.label,
+          page: b.page,
+          observedLabel: b.label || "",
           transcript: (b.transcript || "").slice(0, 600),
+          visualDescription: b.visualDescription || "none",
+          bbox: b.bbox,
         })),
       };
-      const { data, provider } = await llm.generateJson<{
-        assignments: { id: string; label: string | null; continuation?: boolean; confidence?: number }[];
-      }>(MAPPING_SYSTEM, JSON.stringify(mapInput), { maxTokens: 1024 });
+      const { data, provider } = await llm.visionJsonMulti<{
+        assignments: { id: string; label: string; continuation: boolean; confidence: number }[];
+        grades: { label: string; maxScore: number; score: number; feedback: string }[];
+        overall: string;
+      }>(
+        aPages.map((page) => ({ base64: page.base64, mime: page.mime })),
+        FINAL_ASSESSMENT_SYSTEM,
+        JSON.stringify(finalInput),
+        { maxTokens: 6000, responseSchema: FINAL_ASSESSMENT_RESPONSE_SCHEMA },
+      );
       used.add(provider);
-      const takenLabels = new Set<string>();
-      for (const a of data?.assignments ?? []) {
-        if (!a.label) continue;
-        const m = a.id.match(/^b(\d+)$/);
-        if (!m) continue;
-        const entry = candidates[Number(m[1])];
-        if (!entry) continue;
-        const q = byLabel.get(normalizeLabel(a.label).label);
-        const bbox = sanitizeBbox(entry.b.bbox, aPages[entry.b.page]);
-        const isContinuation = a.continuation === true && q?.status === "answered";
-        if (q && bbox && (q.status === "unanswered" || isContinuation) && (isContinuation || !takenLabels.has(q.label))) {
-          attachRegion(q, { page: entry.b.page, bbox }, entry.b.transcript, typeof a.confidence === "number" ? clamp01(a.confidence) : undefined);
+
+      // A block can appear in only one target group. Keep its highest-confidence
+      // valid assignment before resolving each question's primary/continuations.
+      const bestByBlock = new Map<string, (typeof data.assignments)[number]>();
+      for (const assignment of data?.assignments ?? []) {
+        const confidence = Number(assignment.confidence);
+        const blockIndex = Number(assignment.id?.slice(1));
+        const label = typeof assignment.label === "string" ? normalizeLabel(assignment.label).label : "";
+        if (!assignment.id?.match(/^b\d+$/) || !Number.isInteger(blockIndex) || !candidates[blockIndex] || !label || !byLabel.has(label) || !Number.isFinite(confidence) || confidence < 0.55) continue;
+        const existing = bestByBlock.get(assignment.id);
+        if (!existing || Number(existing.confidence) < confidence) bestByBlock.set(assignment.id, assignment);
+      }
+      const byTarget = new Map<string, (typeof data.assignments)[number][]>();
+      for (const assignment of bestByBlock.values()) {
+        const label = normalizeLabel(assignment.label).label;
+        const existing = byTarget.get(label) ?? [];
+        existing.push(assignment);
+        byTarget.set(label, existing);
+      }
+      for (const [label, targetAssignments] of byTarget) {
+        const q = byLabel.get(label);
+        if (!q) continue;
+        const ordered = [...targetAssignments].sort((a, b) => Number(b.confidence) - Number(a.confidence));
+        const primary = ordered.find((assignment) => !assignment.continuation) ?? ordered[0];
+        const primaryEntry = primary && candidates[Number(primary.id.slice(1))];
+        const primaryBbox = primaryEntry ? sanitizeBbox(primaryEntry.b.bbox) : null;
+        if (!primary || !primaryEntry || !primaryBbox) continue;
+        attachRegion(q, { page: primaryEntry.b.page, bbox: primaryBbox }, primaryEntry.b.transcript, Math.min(clamp01(Number(primary.confidence)), clamp01(Number(primaryEntry.b.confidence ?? 1))), primaryEntry.b.visualDescription);
+        consumed[primaryEntry.idx] = true;
+        for (const continuation of ordered.filter((assignment) => assignment !== primary && assignment.continuation)) {
+          const entry = candidates[Number(continuation.id.slice(1))];
+          const bbox = entry ? sanitizeBbox(entry.b.bbox) : null;
+          if (!entry || !bbox || consumed[entry.idx]) continue;
+          attachRegion(q, { page: entry.b.page, bbox }, entry.b.transcript, Math.min(clamp01(Number(continuation.confidence)), clamp01(Number(entry.b.confidence ?? 1))), entry.b.visualDescription);
           consumed[entry.idx] = true;
-          takenLabels.add(q.label);
         }
       }
-    } catch {
-      // If the semantic cross-check is unavailable, use an exact observed label
-      // as a conservative fallback. Unlabeled blocks stay unmatched.
-      candidates.forEach(({ b, idx }) => {
-        if (consumed[idx] || b.label == null) return;
-        const q = byLabel.get(normalizeLabel(String(b.label)).label);
-        const bbox = sanitizeBbox(b.bbox, aPages[b.page]);
-        if (q && bbox && q.status === "unanswered") {
-          attachRegion(q, { page: b.page, bbox }, b.transcript, typeof b.confidence === "number" ? clamp01(b.confidence) : undefined);
-          consumed[idx] = true;
-        }
-      });
+      grades = new Map((data?.grades ?? []).map((grade) => [normalizeLabel(grade.label).label, grade]));
+      overall = data?.overall ?? "";
+      finalSucceeded = true;
+    } catch (err) {
+      // Never trust a possibly misread handwritten label when the image-grounded
+      // reconciliation is unavailable. Keeping it unmatched is safer than grading
+      // the wrong question and showing a misleading highlight.
+      console.error("[pipeline] final multimodal assessment failed:", err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -253,42 +307,20 @@ export async function runPipeline(req: ProcessRequest): Promise<AssessmentResult
   const unmatched: UnmatchedAnswer[] = [];
   blocks.forEach((b, idx) => {
     if (consumed[idx]) return;
-    const bbox = sanitizeBbox(b.bbox, aPages[b.page]);
-    if (!bbox) return;
     unmatched.push({
       label: b.label != null ? normalizeLabel(String(b.label)).label : undefined,
       transcript: (b.transcript || "").trim(),
-      regions: [{ page: b.page, bbox }],
+      visualDescription: b.visualDescription,
+      regions: (() => {
+        const bbox = sanitizeBbox(b.bbox);
+        return bbox ? [{ page: b.page, bbox }] : [];
+      })(),
       confidence: typeof b.confidence === "number" ? clamp01(b.confidence) : undefined,
     });
   });
 
-  // ── 4. Grade + feedback (one batched call) ─────────────────────
-  let overall = "";
-  try {
-    const gradeInput = {
-      questions: questions.map((q) => ({
-        label: q.label,
-        text: q.text,
-        maxScore: q.maxScore > 0 ? q.maxScore : null,
-        answer: q.answer?.transcript?.trim() || "[NO ANSWER]",
-        regions: q.answer?.regions ?? [],
-      })),
-    };
-    const { data, provider } = await llm.visionJsonMulti<{
-      grades: { label: string; maxScore: number; score: number; feedback: string }[];
-      overall: string;
-    }>(
-      aPages.map((page) => ({ base64: page.base64, mime: page.mime })),
-      GRADING_SYSTEM,
-      JSON.stringify(gradeInput),
-      { maxTokens: 6000 },
-    );
-    used.add(provider);
-    overall = data?.overall ?? "";
-    const grades = new Map(
-      (data?.grades ?? []).map((g) => [normalizeLabel(g.label).label, g]),
-    );
+  // ── 4. Apply grades returned with the reconciled assignments ─────
+  if (finalSucceeded) {
     for (const q of questions) {
       const g = grades.get(q.label);
       const inferredMax = g?.maxScore && g.maxScore > 0 ? g.maxScore : q.maxScore > 0 ? q.maxScore : 5;
@@ -297,11 +329,12 @@ export async function runPipeline(req: ProcessRequest): Promise<AssessmentResult
         q.score = 0;
         q.feedback = g?.feedback || "No answer was attempted for this question.";
       } else {
-        q.score = g ? clamp(Math.round(g.score * 2) / 2, 0, q.maxScore) : 0;
-        q.feedback = g?.feedback || "";
+        const rawScore = Number(g?.score);
+        q.score = Number.isFinite(rawScore) ? clamp(Math.round(rawScore * 2) / 2, 0, q.maxScore) : undefined;
+        q.feedback = g?.feedback || "Answer recorded, but Gemini did not return a grade. Review manually before assigning marks.";
       }
     }
-  } catch {
+  } else {
     for (const q of questions) {
       if (q.maxScore <= 0) q.maxScore = 5;
       q.score = q.status === "unanswered" ? 0 : undefined;

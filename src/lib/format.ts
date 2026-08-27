@@ -23,8 +23,12 @@ export function normalizeLabel(raw: string): {
     .replace(/^(ans(wer)?|q(uestion)?)[\s.:)_-]*/i, "");
   const numMatch = cleaned.match(/\d+/);
   const displayNumber = numMatch ? numMatch[0] : cleaned.replace(/[^\dA-Za-z]/g, "");
-  const partMatch = cleaned.match(/\d+\s*[.)\-\s]*\(?([a-z])\)?\b/i);
-  const part = partMatch?.[1]?.toLowerCase();
+  // Only accept a sub-part when it is attached to the number as a clear
+  // marker. This avoids turning a label/text fragment such as "18 x 7" into
+  // the question label "18x".
+  const suffix = numMatch ? cleaned.slice((numMatch.index ?? 0) + numMatch[0].length) : "";
+  const partMatch = suffix.match(/^\s*(?:\(\s*([a-z])\s*\)|[\-:]\s*([a-z])(?:\s*$|[.)])|([a-z])\s*$)/i);
+  const part = (partMatch?.[1] ?? partMatch?.[2] ?? partMatch?.[3])?.toLowerCase();
   const label = part ? `${displayNumber}${part}` : displayNumber;
   return { label, displayNumber, part };
 }

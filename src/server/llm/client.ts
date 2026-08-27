@@ -26,6 +26,13 @@ interface VisionImage {
   mime: string;
 }
 
+type JsonSchema = Record<string, unknown>;
+
+interface GenerateOptions {
+  maxTokens?: number;
+  responseSchema?: JsonSchema;
+}
+
 function extractText(data: GeminiResponse): string {
   const text = (data.candidates?.[0]?.content?.parts ?? []).map((part) => part.text ?? "").join("\n").trim();
   if (!text) throw new Error(data.error?.message || "Gemini returned no text");
@@ -77,7 +84,7 @@ class LLMClient {
   private endpoint() { return `${this.baseUrl}/models/${MODEL}:generateContent?key=${encodeURIComponent(this.apiKey)}`; }
   private modelEndpoint() { return `${this.baseUrl}/models/${MODEL}?key=${encodeURIComponent(this.apiKey)}`; }
 
-  private async generateGemini(instructions: string, input: string, images: VisionImage[] = [], maxTokens = 4096): Promise<string> {
+  private async generateGemini(instructions: string, input: string, images: VisionImage[] = [], { maxTokens = 4096, responseSchema }: GenerateOptions = {}): Promise<string> {
     if (!this.apiKey) throw new Error("GEMINI_API_KEY is not configured");
     const parts: Array<Record<string, unknown>> = [{ text: `${instructions}\n\n${input}` }];
     for (const image of images) {
@@ -86,7 +93,7 @@ class LLMClient {
     const response = await fetchWithTimeout(this.endpoint(), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ contents: [{ role: "user", parts }], generationConfig: { temperature: 0, maxOutputTokens: maxTokens, responseMimeType: "application/json" } }),
+      body: JSON.stringify({ contents: [{ role: "user", parts }], generationConfig: { temperature: 0, maxOutputTokens: maxTokens, responseMimeType: "application/json", ...(responseSchema ? { responseSchema } : {}) } }),
     });
     const body = await response.text();
     let data: GeminiResponse;
@@ -119,34 +126,34 @@ class LLMClient {
     return this.activeProvider;
   }
 
-  async generate(instructions: string, input: string, { maxTokens = 2048 } = {}) {
-    const text = await this.generateGemini(instructions, input, [], maxTokens);
+  async generate(instructions: string, input: string, { maxTokens = 2048, responseSchema }: GenerateOptions = {}) {
+    const text = await this.generateGemini(instructions, input, [], { maxTokens, responseSchema });
     this.activeProvider = "gemini";
     return { text, provider: "gemini" as Provider };
   }
 
-  async generateJson<T>(instructions: string, input: string, { maxTokens = 4096 } = {}) {
-    const result = await this.generate(`${instructions}\n\nRespond with ONLY valid JSON — no prose or markdown fences.`, input, { maxTokens });
+  async generateJson<T>(instructions: string, input: string, { maxTokens = 4096, responseSchema }: GenerateOptions = {}) {
+    const result = await this.generate(`${instructions}\n\nRespond with ONLY valid JSON — no prose or markdown fences.`, input, { maxTokens, responseSchema });
     return { data: extractJson(result.text) as T, provider: result.provider };
   }
 
-  async visionBase64(imageBase64: string, instructions: string, userText: string, { maxTokens = 4096, mime = "image/jpeg" } = {}) {
-    const text = await this.generateGemini(`${instructions}\n\nRespond with ONLY valid JSON — no prose or markdown fences.`, userText, [{ base64: imageBase64, mime }], maxTokens);
+  async visionBase64(imageBase64: string, instructions: string, userText: string, { maxTokens = 4096, mime = "image/jpeg", responseSchema }: GenerateOptions & { mime?: "image/png" | "image/jpeg" } = {}) {
+    const text = await this.generateGemini(`${instructions}\n\nRespond with ONLY valid JSON — no prose or markdown fences.`, userText, [{ base64: imageBase64, mime }], { maxTokens, responseSchema });
     this.activeProvider = "gemini";
     return { text, provider: "gemini" as Provider };
   }
 
-  async visionJson<T>(imageBase64: string, instructions: string, userText: string, options: { maxTokens?: number; mime?: "image/png" | "image/jpeg" } = {}) {
+  async visionJson<T>(imageBase64: string, instructions: string, userText: string, options: GenerateOptions & { mime?: "image/png" | "image/jpeg" } = {}) {
     const result = await this.visionBase64(imageBase64, instructions, userText, options);
     return { data: extractJson(result.text) as T, provider: result.provider };
   }
 
-  async visionJsonMulti<T>(images: VisionImage[], instructions: string, userText: string, { maxTokens = 6000 } = {}) {
+  async visionJsonMulti<T>(images: VisionImage[], instructions: string, userText: string, { maxTokens = 6000, responseSchema }: GenerateOptions = {}) {
     const text = await this.generateGemini(
       `${instructions}\n\nRespond with ONLY valid JSON — no prose or markdown fences.`,
       userText,
       images,
-      maxTokens,
+      { maxTokens, responseSchema },
     );
     this.activeProvider = "gemini";
     return { data: extractJson(text) as T, provider: "gemini" as Provider };

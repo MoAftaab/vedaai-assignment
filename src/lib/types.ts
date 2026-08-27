@@ -14,6 +14,7 @@ export interface Region {
 
 export interface Answer {
   transcript: string;
+  visualDescription?: string;
   regions: Region[];
   confidence?: number;
 }
@@ -36,6 +37,7 @@ export interface Question {
 export interface UnmatchedAnswer {
   label?: string; // label written on the sheet, if any (e.g. "Q7")
   transcript: string;
+  visualDescription?: string;
   regions: Region[];
   confidence?: number;
 }

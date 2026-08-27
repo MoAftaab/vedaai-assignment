@@ -50,17 +50,18 @@ Upload (PDF/images)
    │  client-side: pdf.js rasterizes each page → JPEG (kept small for the
    │  serverless body limit); normalized page images sent to the API
    ▼
-1. Extract questions      Gemini vision, one call per question-paper page (parallel)
-                          → { label, text, maxScore }, labels normalized & de-duped
+1. Extract questions      one Gemini vision batch for all question pages
+                          → { page, label, text, maxScore }, labels normalized & de-duped
    ▼
 2. Transcribe answers     Gemini vision, one call per answer-sheet page (parallel)
-                          → { label?, transcript, bbox[x,y,w,h] } per answer block
+                          → { page, label?, transcript, visualDescription, bbox } per physical block
    ▼
-3. Map answers → questions
-     a. blocks that state their number  → matched directly by label
-     b. remaining unlabelled blocks      → matched to still-unanswered questions
-                                           by content (a text LLM call)
-     c. anything left over               → "unmatched answer"
+3. Reconcile + grade      one multimodal Gemini call with every answer page attached
+                          → image-grounded assignments, continuations, scores, feedback
+                          → labels are evidence, never unconditional mapping instructions
+   ▼
+4. Validate               deterministic label/duplicate/continuation/coordinate checks
+                          → low-confidence conflicts stay unmatched for manual review
    ▼
 4. Grade + feedback       one batched call → per-question score + feedback + overall
    ▼
@@ -68,11 +69,11 @@ Result: questions (with mapped answer, regions, score, feedback),
         unmatched answers, summary, and the active provider.
 ```
 
-**Highlighting.** Each answer block carries a bounding box in **normalized
-`[x, y, w, h]` coordinates (0–1)**. The viewer renders overlays with percentage
-offsets, so a box drawn at `x=0.2` sits at 20% of the image width regardless of
-zoom level or rendered size. Regions store their **page index**, so multi-page
-answers highlight on the correct page.
+**Highlighting.** Gemini returns its documented **`[ymin, xmin, ymax, xmax]` box
+format on a 0–1000 scale**. The server converts it once to normalized
+**`[x, y, w, h]` coordinates (0–1)**. The viewer renders overlays with percentage
+offsets, so highlights stay aligned through zoom and pagination. Regions store
+their page index, so multi-page answers highlight on the correct page.
 
 ---
 
@@ -86,7 +87,8 @@ implemented in [`src/server/llm/client.ts`](src/server/llm/client.ts):
 | Google Gemini | `gemini-2.5-flash` | Generative Language `generateContent` |
 | Local fallback | deterministic | no network; used only when no key is configured |
 
-- **Vision and text** both use Gemini’s multimodal `generateContent` endpoint.
+- **Vision and text** use Gemini’s multimodal `generateContent` endpoint; mapping
+  and grading receive the original answer-sheet images, not OCR text alone.
 - The response reports which `provider` actually served the request, and the
   top bar shows a small telemetry chip.
 - **All AI calls are server-side** (route handlers). API keys are read from
@@ -124,7 +126,7 @@ scripts/make-samples.py   regenerates the sample inputs
 
 ## Run locally
 
-Requires Node 20+.
+Requires Node 24+.
 
 ```bash
 npm install
