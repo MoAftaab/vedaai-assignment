@@ -49,17 +49,17 @@ export const MAPPING_SYSTEM = `You match unlabeled student answer blocks to the 
 
 You are given:
 - "questions": all exam questions — [{"label","text"}].
-- "blocks": unlabeled answer transcriptions — [{"id","transcript"}].
+- "blocks": answer transcriptions, including the student's observed label when one exists — [{"id","observedLabel","transcript"}].
 
-For each block, decide which question label it answers, or null if it clearly answers none. Set "continuation": true only when the block clearly continues an already-matched answer; otherwise false.
+For each block, decide which question label it answers, or null if it clearly answers none. Compare the observed label with the transcript and question text; correct a visibly misread label when the content is stronger evidence. Set "continuation": true only when the block clearly continues an already-matched answer; otherwise false.
 Each unanswered question may be used once. An already-answered question may only be reused as a continuation.
 
 Output JSON shape:
 {"assignments":[{"id":"b0","label":"4","continuation":false,"confidence":0.91},{"id":"b1","label":"4","continuation":true,"confidence":0.84},{"id":"b2","label":null,"continuation":false,"confidence":0.98}]}`;
 
-export const GRADING_SYSTEM = `You are an experienced, encouraging exam grader.
+export const GRADING_SYSTEM = `You are an experienced, encouraging exam grader. The attached images are the student's answer-sheet pages.
 
-You are given a list of questions, each with its max marks and the student's transcribed answer (or "[NO ANSWER]").
+You are given a list of questions, each with its max marks, the student's transcribed answer (or "[NO ANSWER]"), and answer regions with page/bounding-box coordinates. Use the attached answer-sheet images as the source of truth; the transcript is supplementary and may contain OCR errors.
 
 For EACH question:
 - "score": marks awarded, an integer from 0 to maxScore (use a .5 only if clearly warranted).
@@ -70,6 +70,9 @@ Also write "overall": a 1-2 sentence summary of the student's overall performanc
 
 Rules:
 - A "[NO ANSWER]" question scores 0 with feedback noting no answer was attempted.
+- Inspect the relevant image region before grading. Give credit for correct visual work such as diagrams, labels, tables, graphs, equations, mathematical workings, and annotations even when OCR cannot transcribe them.
+- For diagrams and other visual answers, judge correctness, required components, labels, relationships, and clarity against the question. Do not award credit merely because a diagram is present.
+- If the transcript conflicts with visible handwriting or visual work, trust the image. Do not use content from a different question's region.
 - Be fair and consistent. Do not award more than maxScore.
 
 Output JSON shape:

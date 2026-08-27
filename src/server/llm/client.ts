@@ -14,6 +14,18 @@ interface GeminiResponse {
   error?: { message?: string };
 }
 
+class GeminiHttpError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+    this.name = "GeminiHttpError";
+  }
+}
+
+interface VisionImage {
+  base64: string;
+  mime: string;
+}
+
 function extractText(data: GeminiResponse): string {
   const text = (data.candidates?.[0]?.content?.parts ?? []).map((part) => part.text ?? "").join("\n").trim();
   if (!text) throw new Error(data.error?.message || "Gemini returned no text");
@@ -63,11 +75,14 @@ class LLMClient {
   probeStatus: Record<string, { model: string } & ProbeResult> = {};
 
   private endpoint() { return `${this.baseUrl}/models/${MODEL}:generateContent?key=${encodeURIComponent(this.apiKey)}`; }
+  private modelEndpoint() { return `${this.baseUrl}/models/${MODEL}?key=${encodeURIComponent(this.apiKey)}`; }
 
-  private async generateGemini(instructions: string, input: string, image?: { base64: string; mime: string }, maxTokens = 4096): Promise<string> {
+  private async generateGemini(instructions: string, input: string, images: VisionImage[] = [], maxTokens = 4096): Promise<string> {
     if (!this.apiKey) throw new Error("GEMINI_API_KEY is not configured");
     const parts: Array<Record<string, unknown>> = [{ text: `${instructions}\n\n${input}` }];
-    if (image) parts.push({ inline_data: { mime_type: detectMime(image.base64, image.mime), data: image.base64 } });
+    for (const image of images) {
+      parts.push({ inline_data: { mime_type: detectMime(image.base64, image.mime), data: image.base64 } });
+    }
     const response = await fetchWithTimeout(this.endpoint(), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -76,14 +91,25 @@ class LLMClient {
     const body = await response.text();
     let data: GeminiResponse;
     try { data = JSON.parse(body) as GeminiResponse; } catch { throw new Error(`Gemini returned a non-JSON response (HTTP ${response.status})`); }
-    if (!response.ok) throw new Error(`Gemini HTTP ${response.status}: ${data.error?.message ?? body.slice(0, 200)}`);
+    if (!response.ok) throw new GeminiHttpError(response.status, `Gemini HTTP ${response.status}: ${data.error?.message ?? body.slice(0, 200)}`);
     return extractText(data);
   }
 
   async probeGemini(): Promise<ProbeResult> {
     if (!this.apiKey) return { ok: false, status: 0, message: "No GEMINI_API_KEY configured" };
-    try { await this.generateGemini("Return JSON.", 'Respond with {"ok":true}.', undefined, 20); return { ok: true, status: 200, message: "OK" }; }
-    catch (error) { return { ok: false, status: 0, message: error instanceof Error ? error.message : String(error) }; }
+    try {
+      // Model metadata validates the key/model without spending generate-content quota.
+      const response = await fetchWithTimeout(this.modelEndpoint(), { method: "GET" });
+      if (!response.ok) {
+        const body = await response.text();
+        let message = body.slice(0, 200);
+        try { message = (JSON.parse(body) as GeminiResponse).error?.message ?? message; } catch { /* use raw response */ }
+        return { ok: false, status: response.status, message };
+      }
+      return { ok: true, status: response.status, message: "OK" };
+    } catch (error) {
+      return { ok: false, status: error instanceof GeminiHttpError ? error.status : 0, message: error instanceof Error ? error.message : String(error) };
+    }
   }
 
   async probeAndConfigureDefault(): Promise<Provider> {
@@ -94,7 +120,7 @@ class LLMClient {
   }
 
   async generate(instructions: string, input: string, { maxTokens = 2048 } = {}) {
-    const text = await this.generateGemini(instructions, input, undefined, maxTokens);
+    const text = await this.generateGemini(instructions, input, [], maxTokens);
     this.activeProvider = "gemini";
     return { text, provider: "gemini" as Provider };
   }
@@ -105,7 +131,7 @@ class LLMClient {
   }
 
   async visionBase64(imageBase64: string, instructions: string, userText: string, { maxTokens = 4096, mime = "image/jpeg" } = {}) {
-    const text = await this.generateGemini(`${instructions}\n\nRespond with ONLY valid JSON — no prose or markdown fences.`, userText, { base64: imageBase64, mime }, maxTokens);
+    const text = await this.generateGemini(`${instructions}\n\nRespond with ONLY valid JSON — no prose or markdown fences.`, userText, [{ base64: imageBase64, mime }], maxTokens);
     this.activeProvider = "gemini";
     return { text, provider: "gemini" as Provider };
   }
@@ -113,6 +139,17 @@ class LLMClient {
   async visionJson<T>(imageBase64: string, instructions: string, userText: string, options: { maxTokens?: number; mime?: "image/png" | "image/jpeg" } = {}) {
     const result = await this.visionBase64(imageBase64, instructions, userText, options);
     return { data: extractJson(result.text) as T, provider: result.provider };
+  }
+
+  async visionJsonMulti<T>(images: VisionImage[], instructions: string, userText: string, { maxTokens = 6000 } = {}) {
+    const text = await this.generateGemini(
+      `${instructions}\n\nRespond with ONLY valid JSON — no prose or markdown fences.`,
+      userText,
+      images,
+      maxTokens,
+    );
+    this.activeProvider = "gemini";
+    return { data: extractJson(text) as T, provider: "gemini" as Provider };
   }
 
   hasCredentials() { return Boolean(this.apiKey); }

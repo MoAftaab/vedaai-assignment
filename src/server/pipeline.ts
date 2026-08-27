@@ -32,7 +32,7 @@ interface RawBlock {
   bbox: unknown;
   confidence?: number;
 }
-type PagedBlock = { label: string | null; transcript: string; bbox: unknown; page: number };
+type PagedBlock = { label: string | null; transcript: string; bbox: unknown; confidence?: number; page: number };
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const clamp01 = (v: number) => clamp(v, 0, 1);
@@ -198,28 +198,19 @@ export async function runPipeline(req: ProcessRequest): Promise<AssessmentResult
   const blocks: PagedBlock[] = perPageBlocks.flat();
   const consumed = new Array<boolean>(blocks.length).fill(false);
 
-  // ── 3a. Map blocks that carry an explicit label ────────────────
-  blocks.forEach((b, idx) => {
-    if (b.label == null) return;
-    const q = byLabel.get(normalizeLabel(String(b.label)).label);
-    const bbox = sanitizeBbox(b.bbox, aPages[b.page]);
-    if (q && bbox) {
-      attachRegion(q, { page: b.page, bbox }, b.transcript, typeof b.confidence === "number" ? clamp01(b.confidence) : undefined);
-      consumed[idx] = true;
-    }
-  });
-
-  // ── 3b. Fuzzy-map unlabeled blocks to still-unanswered questions ─
-  const unlabeled = blocks
-    .map((b, idx) => ({ b, idx }))
-    .filter(({ b, idx }) => !consumed[idx] && b.label == null);
+  // ── 3. Cross-check every block before mapping ──────────────────
+  // The vision model can misread a handwritten marker (e.g. "Ans 4" as "2").
+  // Send labeled blocks through the semantic matcher too; the marker is evidence,
+  // not an unconditional mapping instruction.
+  const candidates = blocks.map((b, idx) => ({ b, idx }));
   const candidateQuestions = questions;
-  if (unlabeled.length && candidateQuestions.length) {
+  if (candidates.length && candidateQuestions.length) {
     try {
       const mapInput = {
         questions: candidateQuestions.map((q) => ({ label: q.label, text: q.text, alreadyAnswered: q.status === "answered" })),
-        blocks: unlabeled.map(({ b }, i) => ({
+        blocks: candidates.map(({ b }, i) => ({
           id: `b${i}`,
+          observedLabel: b.label,
           transcript: (b.transcript || "").slice(0, 600),
         })),
       };
@@ -232,7 +223,7 @@ export async function runPipeline(req: ProcessRequest): Promise<AssessmentResult
         if (!a.label) continue;
         const m = a.id.match(/^b(\d+)$/);
         if (!m) continue;
-        const entry = unlabeled[Number(m[1])];
+        const entry = candidates[Number(m[1])];
         if (!entry) continue;
         const q = byLabel.get(normalizeLabel(a.label).label);
         const bbox = sanitizeBbox(entry.b.bbox, aPages[entry.b.page]);
@@ -244,7 +235,17 @@ export async function runPipeline(req: ProcessRequest): Promise<AssessmentResult
         }
       }
     } catch {
-      /* mapping is best-effort */
+      // If the semantic cross-check is unavailable, use an exact observed label
+      // as a conservative fallback. Unlabeled blocks stay unmatched.
+      candidates.forEach(({ b, idx }) => {
+        if (consumed[idx] || b.label == null) return;
+        const q = byLabel.get(normalizeLabel(String(b.label)).label);
+        const bbox = sanitizeBbox(b.bbox, aPages[b.page]);
+        if (q && bbox && q.status === "unanswered") {
+          attachRegion(q, { page: b.page, bbox }, b.transcript, typeof b.confidence === "number" ? clamp01(b.confidence) : undefined);
+          consumed[idx] = true;
+        }
+      });
     }
   }
 
@@ -271,12 +272,18 @@ export async function runPipeline(req: ProcessRequest): Promise<AssessmentResult
         text: q.text,
         maxScore: q.maxScore > 0 ? q.maxScore : null,
         answer: q.answer?.transcript?.trim() || "[NO ANSWER]",
+        regions: q.answer?.regions ?? [],
       })),
     };
-    const { data, provider } = await llm.generateJson<{
+    const { data, provider } = await llm.visionJsonMulti<{
       grades: { label: string; maxScore: number; score: number; feedback: string }[];
       overall: string;
-    }>(GRADING_SYSTEM, JSON.stringify(gradeInput), { maxTokens: 6000 });
+    }>(
+      aPages.map((page) => ({ base64: page.base64, mime: page.mime })),
+      GRADING_SYSTEM,
+      JSON.stringify(gradeInput),
+      { maxTokens: 6000 },
+    );
     used.add(provider);
     overall = data?.overall ?? "";
     const grades = new Map(
