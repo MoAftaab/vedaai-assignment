@@ -23,13 +23,17 @@ const NAV: NavItem[] = [
   { icon: PieChart, label: "My Library" },
 ];
 
-export default function Sidebar() {
+export default function Sidebar({ mobileOpen, onClose }: { mobileOpen?: boolean; onClose?: () => void }) {
   const collapsed = useStore((s) => s.sidebarCollapsed);
   const toggle = useStore((s) => s.toggleSidebar);
 
-  if (collapsed) {
+  const responsive = mobileOpen
+    ? "fixed inset-y-0 left-0 z-40 flex w-[280px]"
+    : "hidden lg:flex";
+
+  if (collapsed && !mobileOpen) {
     return (
-      <aside className="flex w-[76px] shrink-0 flex-col items-center gap-1 rounded-r-[26px] bg-surface py-5 shadow-[6px_0_24px_rgba(0,0,0,0.04)]">
+      <aside className={`${responsive} shrink-0 flex-col items-center gap-1 rounded-r-[26px] bg-surface py-5 shadow-[6px_0_24px_rgba(0,0,0,0.04)]`}>
         <Image src="/veda-logo.png" alt="VedaAI" width={34} height={34} className="mb-3 rounded-[9px]" />
         <button
           type="button"
@@ -70,7 +74,9 @@ export default function Sidebar() {
   }
 
   return (
-    <aside className="flex w-[280px] shrink-0 flex-col rounded-r-[26px] bg-surface px-5 py-6 shadow-[6px_0_24px_rgba(0,0,0,0.04)]">
+    <>
+      {mobileOpen && <button type="button" aria-label="Close navigation" onClick={onClose} className="fixed inset-0 z-30 bg-black/25 lg:hidden" />}
+      <aside className={`${responsive} flex-col rounded-r-[26px] bg-surface px-5 py-6 shadow-[6px_0_24px_rgba(0,0,0,0.04)]`}>
       {/* Brand */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2.5">
@@ -133,6 +139,7 @@ export default function Sidebar() {
           </div>
         </div>
       </div>
-    </aside>
+      </aside>
+    </>
   );
 }

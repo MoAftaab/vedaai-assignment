@@ -5,7 +5,7 @@ import type { HealthResponse } from "@/lib/types";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Live health probe: Claude (primary) then OpenAI (fallback).
+// Live health probe for the single configured model.
 export async function GET() {
   const llm = getLLM();
   await llm.probeAndConfigureDefault();

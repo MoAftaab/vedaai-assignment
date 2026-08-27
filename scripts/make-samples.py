@@ -173,6 +173,79 @@ def build_answer_sheet():
     print("wrote", pdf)
 
 
+def build_challenge_set():
+    """Create a harder 2-page paper + 3-page answer set for regression testing."""
+    challenge = os.path.join(ROOT, "samples", "challenge-case")
+    q_dir = os.path.join(challenge, "question-paper")
+    a_dir = os.path.join(challenge, "answer-sheet")
+    os.makedirs(q_dir, exist_ok=True)
+    os.makedirs(a_dir, exist_ok=True)
+    max_w = PAGE_W - MARGIN_L - MARGIN_R
+
+    questions = [
+        ("1.", "Explain why the Moon appears to change shape.", "[3]"),
+        ("2.", "Name two renewable sources of energy.", "[2]"),
+        ("3.", "Calculate 18 x 7 and show your working.", "[2]"),
+        ("4.", "What is the function of red blood cells?", "[2]"),
+        ("5.", "Answer the following:", ""),
+        ("(a)", "Write one property of acids.", "[1]"),
+        ("(b)", "Write one property of bases.", "[1]"),
+        ("6.", "Describe the water cycle in detail.", "[4]"),
+        ("7.", "State one cause of soil erosion.", "[1]"),
+        ("8.", "Name one layer of the Earth's atmosphere.", "[1]"),
+    ]
+    q_pages = []
+    for page_no, page_questions in enumerate((questions[:5], questions[5:]), 1):
+        img, d = new_page()
+        y = MARGIN_T
+        d.text((MARGIN_L, y), "Challenge Assessment - Class VIII", font=F_TITLE, fill=INK)
+        y += 72
+        d.text((MARGIN_L, y), f"Question Paper - Page {page_no} of 2", font=F_SUB, fill=FAINT)
+        y += 64
+        for num, text, marks in page_questions:
+            indent = 58 if num.startswith("(") else 0
+            d.text((MARGIN_L + indent, y), num, font=F_QB, fill=INK)
+            lines = wrap(d, text, F_Q, PAGE_W - MARGIN_L - MARGIN_R - indent - 90)
+            tx = MARGIN_L + indent + 64
+            for i, line in enumerate(lines):
+                d.text((tx, y), line, font=F_Q, fill=INK)
+                if i == 0 and marks:
+                    mw = d.textlength(marks, font=F_Q)
+                    d.text((PAGE_W - MARGIN_R - mw, y), marks, font=F_Q, fill=FAINT)
+                y += 48
+            y += 34
+        path = os.path.join(q_dir, f"question-paper-page-{page_no}.png")
+        img.save(path, "PNG")
+        q_pages.append(img)
+    q_pages[0].save(os.path.join(q_dir, "challenge-question-paper.pdf"), "PDF", resolution=150.0, save_all=True, append_images=[q_pages[1]])
+
+    answers = [
+        [("Ans 4.", "Red blood cells carry oxygen from the lungs to all parts of the body."),
+         ("Ans 2.", "Solar energy and wind energy are renewable sources."),
+         ("Ans 5(a).", "Acids turn blue litmus paper red."),
+         ("Ans 5(b).", "Bases feel soapy and turn red litmus paper blue.")],
+        [("Ans 3.", "18 x 7 = 126. First 18 x 5 = 90, then 18 x 2 = 36, so 90 + 36 = 126."),
+         ("Ans 1.", "The Moon is lit by the Sun. As it orbits Earth, we see different amounts of its bright half."),
+         ("Ans 7.", "Cutting down trees can cause soil erosion."),
+         ("Ans 9.", "This answer has no matching question and should appear as unmatched.")],
+        [("Ans 6.", "Water evaporates because of the Sun's heat and rises as vapour. It cools and forms clouds."),
+         ("", "When clouds become heavy, precipitation falls as rain. Water collects in rivers and oceans, and the cycle repeats.")],
+    ]
+    answer_pages = []
+    for page_no, blocks in enumerate(answers, 1):
+        img, d = ruled()
+        d.text((MARGIN_L, MARGIN_T), f"Name: Meera Khan    Challenge answer sheet    Page {page_no} of 3", font=F_HAND_SM, fill=(60, 60, 70))
+        y = MARGIN_T + 150
+        for num, text in blocks:
+            y = hand_block(d, MARGIN_L + 24, y, num, text, max_w)
+        path = os.path.join(a_dir, f"answer-sheet-page-{page_no}.png")
+        img.save(path, "PNG")
+        answer_pages.append(img)
+    answer_pages[0].save(os.path.join(a_dir, "challenge-answer-sheet.pdf"), "PDF", resolution=150.0, save_all=True, append_images=answer_pages[1:])
+    print("wrote", challenge)
+
+
 build_question_paper()
 build_answer_sheet()
+build_challenge_set()
 print("done")

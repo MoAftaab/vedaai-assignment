@@ -9,6 +9,13 @@ import type {
 import { formatBytes } from "./format";
 
 export type Phase = "upload" | "processing" | "result" | "error";
+export type ProgressStage =
+  | "preparing"
+  | "extracting-questions"
+  | "extracting-answers"
+  | "mapping-answers"
+  | "grading"
+  | "finishing";
 
 export interface UploadedFile {
   file: File;
@@ -38,6 +45,8 @@ interface State {
 
   error?: string;
   provider?: Provider;
+  progressStage?: ProgressStage;
+  progressPercent: number;
 
   result?: AssessmentResult;
   answerPageUrls: string[]; // data URLs for the on-screen scan viewer
@@ -72,6 +81,7 @@ export const useStore = create<State>((set, get) => ({
   zoom: 1,
   expanded: {},
   expandedAll: false,
+  progressPercent: 0,
 
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
   setSidebar: (v) => set({ sidebarCollapsed: v }),
@@ -82,27 +92,55 @@ export const useStore = create<State>((set, get) => ({
     const { questionFile, answerFile } = get();
     if (!questionFile || !answerFile) return;
 
-    set({ phase: "processing", error: undefined, sidebarCollapsed: true });
+    set({
+      phase: "processing",
+      error: undefined,
+      sidebarCollapsed: true,
+      progressStage: "preparing",
+      progressPercent: 8,
+    });
     try {
       const { fileToPages } = await import("./pdf");
+      set({ progressStage: "preparing", progressPercent: 18 });
       const [questionRendered, answerRendered] = await Promise.all([
         fileToPages(questionFile.file, 1200),
         fileToPages(answerFile.file, 1200),
       ]);
+
+      set({ progressStage: "extracting-questions", progressPercent: 28 });
 
       const toPayload = (
         pages: Awaited<ReturnType<typeof fileToPages>>,
       ): PageImage[] =>
         pages.map((p) => ({ base64: p.base64, mime: p.mime, w: p.w, h: p.h }));
 
-      const res = await fetch("/api/process", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          questionPages: toPayload(questionRendered),
-          answerPages: toPayload(answerRendered),
-        }),
-      });
+      set({ progressStage: "extracting-answers", progressPercent: 44 });
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      set({ progressStage: "mapping-answers", progressPercent: 62 });
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      set({ progressStage: "grading", progressPercent: 80 });
+
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 55_000);
+      let res: Response;
+      try {
+        res = await fetch("/api/process", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            questionPages: toPayload(questionRendered),
+            answerPages: toPayload(answerRendered),
+          }),
+        });
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          throw new Error("Processing took too long. Try fewer pages or smaller files.");
+        }
+        throw error;
+      } finally {
+        window.clearTimeout(timeout);
+      }
 
       const text = await res.text();
       let json: ProcessResponse;
@@ -128,6 +166,7 @@ export const useStore = create<State>((set, get) => ({
         throw new Error(json.error || `Processing failed (HTTP ${res.status})`);
       }
 
+      set({ progressStage: "finishing", progressPercent: 96 });
       const result = json.result;
       const firstAnswered =
         result.questions.find((q) => q.status === "answered") ??
@@ -138,6 +177,8 @@ export const useStore = create<State>((set, get) => ({
         provider: result.provider,
         answerPageUrls: answerRendered.map((p) => p.dataUrl),
         phase: "result",
+        progressStage: undefined,
+        progressPercent: 100,
         zoom: 1,
         expanded: {},
         expandedAll: false,
@@ -149,6 +190,8 @@ export const useStore = create<State>((set, get) => ({
       set({
         phase: "error",
         error: err instanceof Error ? err.message : String(err),
+        progressStage: undefined,
+        progressPercent: 0,
       });
     }
   },
@@ -192,6 +235,8 @@ export const useStore = create<State>((set, get) => ({
       zoom: 1,
       expanded: {},
       expandedAll: false,
+      progressStage: undefined,
+      progressPercent: 0,
       sidebarCollapsed: false,
     }),
 }));

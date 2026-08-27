@@ -1,8 +1,7 @@
 # Render Blueprint — deploys the Next.js app as a Node web service.
 #
 # In the Render dashboard:  New +  →  Blueprint  →  connect this repo.
-# Render reads this file, then prompts for the two secret env vars below
-# (AGENTROUTER_API_KEY, OPENAI_API_KEY) which are marked `sync: false`.
+# Render reads this file, then prompts for the Gemini secret marked `sync: false`.
 services:
   - type: web
     name: vedaai-assignment
@@ -17,16 +16,8 @@ services:
       - key: NODE_VERSION
         value: "20"
       # Non-secret config (safe to keep in the blueprint).
-      - key: AGENTROUTER_BASE_URL
-        value: https://agentrouter.org
-      - key: AGENTROUTER_MODEL
-        value: gpt-5.6-sol
-      - key: OPENAI_BASE_URL
-        value: https://generativelanguage.googleapis.com/v1beta/openai/
-      - key: OPENAI_MODEL
-        value: gemini-2.5-flash
+      - key: GEMINI_BASE_URL
+        value: https://generativelanguage.googleapis.com/v1beta
       # Secrets — set in the Render dashboard, never committed.
-      - key: AGENTROUTER_API_KEY
-        sync: false
-      - key: OPENAI_API_KEY
+      - key: GEMINI_API_KEY
         sync: false

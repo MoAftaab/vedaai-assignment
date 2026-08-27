@@ -1,7 +1,7 @@
 // Shared data model for the assessment extraction + mapping pipeline.
 // Everything is held in memory (no DB / auth) per the assignment constraints.
 
-export type Provider = "agentrouter" | "openai" | "deterministic";
+export type Provider = "gemini" | "deterministic";
 
 /** Normalized bounding box on a page: [x, y, w, h], each in 0..1. */
 export type BBox = [number, number, number, number];

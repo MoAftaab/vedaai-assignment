@@ -94,8 +94,7 @@ function attachRegion(q: Question, region: Region, transcript: string) {
 }
 
 function pickProvider(used: Set<Provider>): Provider {
-  if (used.has("agentrouter")) return "agentrouter";
-  if (used.has("openai")) return "openai";
+  if (used.has("gemini")) return "gemini";
   return "deterministic";
 }
 
@@ -104,7 +103,7 @@ export async function runPipeline(req: ProcessRequest): Promise<AssessmentResult
   const used = new Set<Provider>();
   const qPages: PageImage[] = req.questionPages ?? [];
   const aPages: PageImage[] = req.answerPages ?? [];
-  // Remembered so a total provider outage produces an actionable message
+  // Remembered so a total Gemini outage produces an actionable message
   // instead of an empty (but "successful") result.
   let lastError: string | null = null;
 
@@ -126,12 +125,12 @@ export async function runPipeline(req: ProcessRequest): Promise<AssessmentResult
     }
   });
 
-  // Fail fast: if no provider answered a single vision call, the AI is
+  // Fail fast: if Gemini did not answer a single vision call, the AI is
   // unreachable from this server — surface that instead of spending another
   // 90s per answer page to arrive at an empty screen.
-  if (qPages.length > 0 && !used.has("agentrouter") && !used.has("openai")) {
+  if (qPages.length > 0 && !used.has("gemini")) {
     throw new Error(
-      `AI service unreachable from the server. No provider completed a request. Last error: ${lastError ?? "unknown"}`,
+      `Gemini is unreachable from the server. No Gemini request completed. Last error: ${lastError ?? "unknown"}`,
     );
   }
 
@@ -207,18 +206,18 @@ export async function runPipeline(req: ProcessRequest): Promise<AssessmentResult
   const unlabeled = blocks
     .map((b, idx) => ({ b, idx }))
     .filter(({ b, idx }) => !consumed[idx] && b.label == null);
-  const stillUnanswered = questions.filter((q) => q.status === "unanswered");
-  if (unlabeled.length && stillUnanswered.length) {
+  const candidateQuestions = questions;
+  if (unlabeled.length && candidateQuestions.length) {
     try {
       const mapInput = {
-        questions: stillUnanswered.map((q) => ({ label: q.label, text: q.text })),
+        questions: candidateQuestions.map((q) => ({ label: q.label, text: q.text, alreadyAnswered: q.status === "answered" })),
         blocks: unlabeled.map(({ b }, i) => ({
           id: `b${i}`,
           transcript: (b.transcript || "").slice(0, 600),
         })),
       };
       const { data, provider } = await llm.generateJson<{
-        assignments: { id: string; label: string | null }[];
+        assignments: { id: string; label: string | null; continuation?: boolean }[];
       }>(MAPPING_SYSTEM, JSON.stringify(mapInput), { maxTokens: 1024 });
       used.add(provider);
       const takenLabels = new Set<string>();
@@ -230,7 +229,8 @@ export async function runPipeline(req: ProcessRequest): Promise<AssessmentResult
         if (!entry) continue;
         const q = byLabel.get(normalizeLabel(a.label).label);
         const bbox = sanitizeBbox(entry.b.bbox, aPages[entry.b.page]);
-        if (q && bbox && q.status === "unanswered" && !takenLabels.has(q.label)) {
+        const isContinuation = a.continuation === true && q?.status === "answered";
+        if (q && bbox && (q.status === "unanswered" || isContinuation) && (isContinuation || !takenLabels.has(q.label))) {
           attachRegion(q, { page: entry.b.page, bbox }, entry.b.transcript);
           consumed[entry.idx] = true;
           takenLabels.add(q.label);

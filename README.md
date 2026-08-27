@@ -7,14 +7,13 @@ question — **highlights the exact region on the answer sheet** where that answ
 was written.
 
 Built for the VedaAI hiring assignment. Next.js + TypeScript + Tailwind, with a
-Claude-powered vision pipeline.
+Gemini-powered vision pipeline.
 
 ---
 
 ## Live demo
 
-- **Vercel:** _add your URL after deploying (see [Deployment](#deployment))_
-- **Render:** _add your URL after deploying_
+- **Vercel:** https://vedaai-assignment-silk.vercel.app/
 
 > No sign-up. Grab the ready-made [`samples/`](samples/) (a question paper + a
 > 2-page handwritten answer sheet) and drop them straight in.
@@ -51,10 +50,10 @@ Upload (PDF/images)
    │  client-side: pdf.js rasterizes each page → JPEG (kept small for the
    │  serverless body limit); normalized page images sent to the API
    ▼
-1. Extract questions      Claude vision, one call per question-paper page (parallel)
+1. Extract questions      Gemini vision, one call per question-paper page (parallel)
                           → { label, text, maxScore }, labels normalized & de-duped
    ▼
-2. Transcribe answers     Claude vision, one call per answer-sheet page (parallel)
+2. Transcribe answers     Gemini vision, one call per answer-sheet page (parallel)
                           → { label?, transcript, bbox[x,y,w,h] } per answer block
    ▼
 3. Map answers → questions
@@ -79,18 +78,15 @@ answers highlight on the correct page.
 
 ## AI model & API
 
-The routing requirement for this project: **use Claude by default, with OpenAI as
-a fallback.** Implemented in [`src/server/llm/client.ts`](src/server/llm/client.ts):
+The app uses **Gemini 2.5 Flash only**, through Google’s Generative Language API,
+implemented in [`src/server/llm/client.ts`](src/server/llm/client.ts):
 
-| Priority | Provider | Model | API shape |
+| Provider | Model | API shape |
 |---|---|---|---|
-| **1 — primary** | **Claude** via AgentRouter (`agentrouter.org`) | `claude-opus-4-8` | Anthropic Messages |
-| **2 — fallback** | OpenAI | `gpt-5.4-mini` **only** | Chat Completions |
-| **3 — last resort** | deterministic (no network) | — | so the app never hard-crashes |
+| Google Gemini | `gemini-2.5-flash` | Generative Language `generateContent` |
+| Local fallback | deterministic | no network; used only when no key is configured |
 
-- **Vision and text** both try **Claude first**; on any error or non-200, they
-  **fail over to OpenAI before the first token** is consumed, so a bad provider
-  fails cleanly rather than mid-stream.
+- **Vision and text** both use Gemini’s multimodal `generateContent` endpoint.
 - The response reports which `provider` actually served the request, and the
   top bar shows a small telemetry chip.
 - **All AI calls are server-side** (route handlers). API keys are read from
@@ -115,7 +111,7 @@ src/
     api/process/route.ts  the pipeline endpoint (Node runtime, maxDuration 60)
     api/health/route.ts   live provider health probe
   server/
-    llm/client.ts         multi-provider client (Claude primary, OpenAI fallback)
+    llm/client.ts         Gemini 2.5 Flash client
     pipeline.ts           extract → map → grade orchestration
     prompts.ts            vision + grading system prompts
   components/             shell (sidebar/topbar), upload, loading, mapping, error
@@ -132,15 +128,15 @@ Requires Node 20+.
 
 ```bash
 npm install
-cp .env.example .env.local   # then fill in AGENTROUTER_API_KEY
+cp .env.example .env.local   # then fill in GEMINI_API_KEY
 npm run dev
 ```
 
 Open http://localhost:3000 and drop in the files from [`samples/`](samples/).
 
 **Environment variables** (see [`.env.example`](.env.example)): only
-`AGENTROUTER_API_KEY` is strictly required — base URLs and model names have
-sensible defaults. Add `OPENAI_API_KEY` to enable the fallback path.
+`GEMINI_API_KEY` is required for AI processing. The model is fixed to
+`gemini-2.5-flash` so deployment configuration cannot silently select another model.
 
 ---
 
@@ -154,8 +150,8 @@ commit real keys.
 1. Push to GitHub (done).
 2. [vercel.com](https://vercel.com) → **New Project** → import this repo.
    Next.js is auto-detected — no extra config needed.
-3. **Settings → Environment Variables:** add `AGENTROUTER_API_KEY` (required) and
-   `OPENAI_API_KEY` (optional). The base-URL / model vars are optional overrides.
+3. **Settings → Environment Variables:** add `GEMINI_API_KEY` (required). The
+   Gemini base URL is optional.
 4. **Deploy.** The `/api/process` function is configured for a 60s max duration.
 
 Or via CLI: `vercel` then `vercel --prod`.
@@ -165,8 +161,8 @@ Or via CLI: `vercel` then `vercel --prod`.
 1. Push to GitHub (done).
 2. [render.com](https://render.com) → **New +** → **Blueprint** → connect this
    repo. Render reads [`render.yaml`](render.yaml).
-3. When prompted, set the two secret env vars (`AGENTROUTER_API_KEY`,
-   `OPENAI_API_KEY`). Non-secret config is already in the blueprint.
+3. When prompted, set the `GEMINI_API_KEY` secret. The non-secret Gemini base URL
+   is already in the blueprint.
 4. **Apply** to deploy the Node web service.
 
 > On both free tiers the instance cold-starts after inactivity, so the first

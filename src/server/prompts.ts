@@ -43,17 +43,17 @@ export function answerUserText(pageIndex: number, total: number): string {
   return `Transcribe and locate every handwritten answer block on this answer-sheet page (page ${pageIndex + 1} of ${total}). All bbox coordinates are fractions of THIS page's width and height.`;
 }
 
-export const MAPPING_SYSTEM = `You match unlabeled student answer blocks to the exam questions they most likely answer, using content similarity.
+export const MAPPING_SYSTEM = `You match unlabeled student answer blocks to the exam questions they most likely answer, using content similarity. A block on a later page may be a continuation of an answer already found on an earlier page.
 
 You are given:
-- "questions": exam questions still without an answer — [{"label","text"}].
+- "questions": all exam questions — [{"label","text"}].
 - "blocks": unlabeled answer transcriptions — [{"id","transcript"}].
 
-For each block, decide which question label it answers, or null if it clearly answers none.
-A question label may be used at most once. Only match when the content genuinely corresponds.
+For each block, decide which question label it answers, or null if it clearly answers none. Set "continuation": true only when the block clearly continues an already-matched answer; otherwise false.
+Each unanswered question may be used once. An already-answered question may only be reused as a continuation.
 
 Output JSON shape:
-{"assignments":[{"id":"b0","label":"4"},{"id":"b1","label":null}]}`;
+{"assignments":[{"id":"b0","label":"4","continuation":false},{"id":"b1","label":"4","continuation":true},{"id":"b2","label":null,"continuation":false}]}`;
 
 export const GRADING_SYSTEM = `You are an experienced, encouraging exam grader.
 

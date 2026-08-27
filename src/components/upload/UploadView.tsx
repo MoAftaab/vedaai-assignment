@@ -4,6 +4,8 @@ import Image from "next/image";
 import { ArrowRight, FileText, Upload, X } from "lucide-react";
 import { useStore, toUploadedFile, type UploadedFile } from "@/lib/store";
 
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+
 function accepted(file: File) {
   return (
     file.type === "application/pdf" ||
@@ -16,18 +18,29 @@ function Dropzone({
   title,
   value,
   onChange,
+  onInvalid,
   className,
 }: {
   title: string;
   value?: UploadedFile;
   onChange: (f?: UploadedFile) => void;
+  onInvalid: (message: string) => void;
   className?: string;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
 
   async function handleFile(file?: File | null) {
-    if (!file || !accepted(file)) return;
+    if (!file) return;
+    if (!accepted(file)) {
+      onInvalid("Please choose a PDF or image file.");
+      return;
+    }
+    if (file.size > MAX_FILE_BYTES) {
+      onInvalid("Files must be 10MB or smaller.");
+      return;
+    }
+    onInvalid("");
     onChange(toUploadedFile(file)); // instant feedback
     try {
       const { getPageCount } = await import("@/lib/pdf");
@@ -105,6 +118,7 @@ function Dropzone({
 }
 
 export default function UploadView() {
+  const [validationError, setValidationError] = useState("");
   const questionFile = useStore((s) => s.questionFile);
   const answerFile = useStore((s) => s.answerFile);
   const setQuestionFile = useStore((s) => s.setQuestionFile);
@@ -134,21 +148,28 @@ export default function UploadView() {
           className="my-8 h-[180px] w-[180px] select-none"
         />
 
-        <div className="w-full overflow-hidden rounded-[24px] border-2 border-dashed border-line-strong bg-surface shadow-[0_12px_40px_rgba(0,0,0,0.04)]">
-          <div className="grid grid-cols-1 sm:grid-cols-2">
+        <div className="w-full rounded-[24px] bg-surface p-4 shadow-[0_12px_40px_rgba(0,0,0,0.04)] sm:p-5">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Dropzone
               title="Question Paper"
               value={questionFile}
               onChange={setQuestionFile}
+              onInvalid={setValidationError}
             />
             <Dropzone
               title="Answer Sheet"
               value={answerFile}
               onChange={setAnswerFile}
-              className="border-t-2 border-dashed border-line-strong sm:border-l-2 sm:border-t-0"
+              onInvalid={setValidationError}
             />
           </div>
         </div>
+
+        {validationError && (
+          <p role="alert" className="mt-4 rounded-xl bg-danger-50 px-4 py-2.5 text-center text-[14px] font-semibold text-danger">
+            {validationError}
+          </p>
+        )}
 
         <button
           type="button"
