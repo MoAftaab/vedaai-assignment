@@ -94,7 +94,7 @@ export default function QuestionCard({ q }: { q: Question }) {
             </p>
             {needsReview && (
               <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-[12px] font-semibold leading-relaxed text-amber">
-                Gemini is less certain about this mapping or highlight. Check the answer region before using the score.
+                The AI is less certain about this mapping or highlight. Check the answer region before using the score.
               </p>
             )}
           </div>

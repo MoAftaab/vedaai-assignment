@@ -53,7 +53,7 @@ function Dropzone({
 
   return (
     <div
-      className={`relative flex min-h-[232px] items-center justify-center px-6 py-10 transition-colors ${
+      className={`relative flex min-h-[232px] items-center justify-center rounded-[20px] border-2 border-dashed border-line-strong px-6 py-10 transition-colors ${
         dragging ? "bg-brand-50/60" : ""
       } ${className ?? ""}`}
       onDragOver={(e) => {
@@ -186,7 +186,7 @@ export default function UploadView() {
         </button>
 
         <p className="mt-5 text-center text-[14px] text-ink-45">
-          Once both files are uploaded, you&apos;ll able to map answers with questions
+          Once both files are uploaded, you&apos;ll be able to map answers with questions
         </p>
       </div>
     </div>

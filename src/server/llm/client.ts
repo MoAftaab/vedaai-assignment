@@ -1,6 +1,6 @@
 import "server-only";
 
-/** Server-side multimodal client with Gemini primary and optional router fallback. */
+/** Server-side multimodal client with configurable provider order and fallback. */
 export type Provider = "gemini" | "agent-router" | "deterministic";
 
 export interface ProbeResult { ok: boolean; status: number; message: string }

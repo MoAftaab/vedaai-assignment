@@ -7,7 +7,7 @@ question — **highlights the exact region on the answer sheet** where that answ
 was written.
 
 Built for the VedaAI hiring assignment. Next.js + TypeScript + Tailwind, with a
-Gemini-powered vision pipeline.
+multi-provider vision pipeline.
 
 ---
 
@@ -50,13 +50,13 @@ Upload (PDF/images)
    │  client-side: pdf.js rasterizes each page → JPEG (kept small for the
    │  serverless body limit); normalized page images sent to the API
    ▼
-1. Extract questions      one Gemini vision batch for all question pages
+1. Extract questions      one multimodal vision batch for all question pages
                           → { page, label, text, maxScore }, labels normalized & de-duped
    ▼
-2. Transcribe answers     Gemini vision, one call per answer-sheet page (parallel)
+2. Transcribe answers     multimodal vision, one call per answer-sheet page (parallel)
                           → { page, label?, transcript, visualDescription, bbox } per physical block
    ▼
-3. Reconcile + grade      one multimodal Gemini call with every answer page attached
+3. Reconcile + grade      one multimodal call with every answer page attached
                           → image-grounded assignments, continuations, scores, feedback
                           → labels are evidence, never unconditional mapping instructions
    ▼
@@ -69,7 +69,7 @@ Result: questions (with mapped answer, regions, score, feedback),
         unmatched answers, summary, and the active provider.
 ```
 
-**Highlighting.** Gemini returns its documented **`[ymin, xmin, ymax, xmax]` box
+**Highlighting.** The vision provider returns its documented **`[ymin, xmin, ymax, xmax]` box
 format on a 0–1000 scale**. The server converts it once to normalized
 **`[x, y, w, h]` coordinates (0–1)**. The viewer renders overlays with percentage
 offsets, so highlights stay aligned through zoom and pagination. Regions store
@@ -79,21 +79,20 @@ their page index, so multi-page answers highlight on the correct page.
 
 ## AI model & API
 
-The app uses **Gemini 2.5 Flash as the primary model**, through Google’s
-Generative Language API. If Gemini is unavailable, an optional Agent Router
-fallback can be enabled through environment variables. Both paths are
-implemented in [`src/server/llm/client.ts`](src/server/llm/client.ts):
+The deployed app uses **Agent Router as the primary provider** with Gemini as a
+fallback. Provider order and credentials are configured through environment
+variables. Both paths are implemented in [`src/server/llm/client.ts`](src/server/llm/client.ts):
 
 | Provider | Model | API shape |
 |---|---|---|---|
 | Google Gemini | `gemini-2.5-flash` | Generative Language `generateContent` |
-| Agent Router | configured model list | optional OpenAI-compatible / Anthropic-compatible fallback |
+| Agent Router | configured model list | OpenAI-compatible / Anthropic-compatible primary |
 | Local fallback | deterministic | no network; used only when no AI key is configured |
 
-- **Vision and text** use Gemini’s multimodal `generateContent` endpoint; mapping
+- **Vision and text** use the selected provider’s multimodal endpoint; mapping
   and grading receive the original answer-sheet images, not OCR text alone.
 - The response reports which provider actually served the final request, and
-  the top bar explains when Agent Router fallback was used.
+  the top bar reports the provider that completed the assessment.
 - **All AI calls are server-side** (route handlers). API keys are read from
   environment variables and are **never** exposed to the browser.
 
@@ -116,7 +115,7 @@ src/
     api/process/route.ts  the pipeline endpoint (Node runtime, maxDuration 120)
     api/health/route.ts   live provider health probe
   server/
-    llm/client.ts         Gemini 2.5 Flash client
+    llm/client.ts         Gemini + Agent Router client
     pipeline.ts           extract → map → grade orchestration
     prompts.ts            vision + grading system prompts
   components/             shell (sidebar/topbar), upload, loading, mapping, error
@@ -140,9 +139,9 @@ npm run dev
 Open http://localhost:3000 and drop in the files from [`samples/`](samples/).
 
 **Environment variables** (see [`.env.example`](.env.example)): only
-`GEMINI_API_KEY` is the primary AI credential. To enable fallback, also set
-`AGENT_ROUTER_API_KEY` and a comma-separated `AGENT_ROUTER_MODELS` list. The
-router base URL and protocol are configurable; `auto` uses Anthropic Messages
+`GEMINI_API_KEY` and `AGENT_ROUTER_API_KEY` are server-side AI credentials. Set
+`PRIMARY_LLM_PROVIDER` and a comma-separated `AGENT_ROUTER_MODELS` list to
+control provider order. The router base URL and protocol are configurable; `auto` uses Anthropic Messages
 for Claude model IDs and OpenAI Chat Completions for other model IDs. No model
 or key is hardcoded in application code.
 
@@ -158,10 +157,10 @@ commit real keys.
 1. Push to GitHub (done).
 2. [vercel.com](https://vercel.com) → **New Project** → import this repo.
    Next.js is auto-detected — no extra config needed.
-3. **Settings → Environment Variables:** add `GEMINI_API_KEY` (primary). Add
-   `AGENT_ROUTER_API_KEY`, `AGENT_ROUTER_BASE_URL`, `AGENT_ROUTER_API_FORMAT`,
-   and `AGENT_ROUTER_MODELS` when fallback is desired. The Gemini base URL is
-   optional.
+3. **Settings → Environment Variables:** add `GEMINI_API_KEY` and the Agent
+   Router variables (`AGENT_ROUTER_API_KEY`, `AGENT_ROUTER_BASE_URL`,
+   `AGENT_ROUTER_API_FORMAT`, `AGENT_ROUTER_MODELS`, and
+   `PRIMARY_LLM_PROVIDER`). The Gemini base URL is optional.
 4. **Deploy.** The `/api/process` function is configured for a 120s max duration.
 
 Or via CLI: `vercel` then `vercel --prod`.

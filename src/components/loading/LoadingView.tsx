@@ -31,7 +31,7 @@ export default function LoadingView() {
         <h2 className="mt-6 text-center text-[30px] font-extrabold tracking-tight text-ink">
           {LABELS[stage]}
         </h2>
-        <p className="mt-2 text-[18px] text-ink-70">Gemini 2.5 Flash is analyzing both files</p>
+        <p className="mt-2 text-[18px] text-ink-70">AI is analyzing both files</p>
         <div className="mt-7 w-full max-w-sm">
           <div className="h-2 overflow-hidden rounded-full bg-surface-2">
             <div className="h-full rounded-full bg-brand transition-[width] duration-500" style={{ width: `${percent}%` }} />

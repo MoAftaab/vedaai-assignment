@@ -103,13 +103,13 @@ export async function runPipeline(req: ProcessRequest): Promise<AssessmentResult
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Gemini could not extract the assessment pages. ${message}`);
+    throw new Error(`AI could not extract the assessment pages. ${message}`);
   }
 
   const questions = buildQuestions(questionData?.questions ?? []);
-  if (!questions.length) throw new Error("Gemini returned no questions from the question paper.");
+  if (!questions.length) throw new Error("AI returned no questions from the question paper.");
   const blocks = (answerData?.blocks ?? []).filter((block) => Number.isInteger(Number(block.page)) && Number(block.page) >= 0 && Number(block.page) < answerPages.length);
-  if (!blocks.length) throw new Error("Gemini could not find handwritten answer blocks on the answer sheet.");
+  if (!blocks.length) throw new Error("AI could not find handwritten answer blocks on the answer sheet.");
   const byLabel = new Map(questions.map((question) => [question.label, question]));
 
   const mappingInput = {
@@ -124,7 +124,7 @@ export async function runPipeline(req: ProcessRequest): Promise<AssessmentResult
     finalProvider = result.provider;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Gemini could not reconcile the answer mapping. ${message}`);
+    throw new Error(`AI could not reconcile the answer mapping. ${message}`);
   }
 
   const consumed = new Array<boolean>(blocks.length).fill(false);
@@ -155,7 +155,7 @@ export async function runPipeline(req: ProcessRequest): Promise<AssessmentResult
       return topDifference || b.assignment.confidence - a.assignment.confidence;
     });
     // Prefer the strongest physically observed section as the primary answer.
-    // If Gemini corrected a noisy handwritten label, the assignment confidence
+    // If the model corrected a noisy handwritten label, the assignment confidence
     // still wins; physical order then keeps continuation blocks deterministic.
     const primary = [...ordered].sort((a, b) => {
       const confidenceDifference = b.assignment.confidence - a.assignment.confidence;
@@ -203,7 +203,7 @@ export async function runPipeline(req: ProcessRequest): Promise<AssessmentResult
     } else {
       const score = Number(grade?.score);
       question.score = Number.isFinite(score) ? clamp(Math.round(score * 2) / 2, 0, question.maxScore) : undefined;
-      question.feedback = grade?.feedback || "Answer recorded, but Gemini did not return a grade. Review manually before assigning marks.";
+      question.feedback = grade?.feedback || "Answer recorded, but the AI did not return a grade. Review manually before assigning marks.";
     }
   }
 

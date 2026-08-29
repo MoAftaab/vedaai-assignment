@@ -104,7 +104,7 @@ export default function QuestionList() {
           <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-[13px] leading-relaxed text-amber">
             <span className="font-bold">Review recommended.</span>{" "}
             {reviewCount > 0 && `${reviewCount} answer${reviewCount === 1 ? "" : "s"} need${reviewCount === 1 ? "s" : ""} a confidence check.`}{" "}
-            {ungradedCount > 0 && "Some answers were not graded because Gemini grading was unavailable."}
+            {ungradedCount > 0 && "Some answers were not graded because AI grading was unavailable."}
           </div>
         )}
         <AiSummary />
