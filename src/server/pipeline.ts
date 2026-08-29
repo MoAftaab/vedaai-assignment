@@ -26,9 +26,15 @@ function sanitizeBbox(raw: unknown): BBox | null {
   if (values.some((value) => !Number.isFinite(value) || value < 0 || value > 1000)) return null;
   const [ymin, xmin, ymax, xmax] = values;
   if (ymax <= ymin || xmax <= xmin) return null;
-  const x = clamp01(xmin / 1000);
-  const y = clamp01(ymin / 1000);
-  return [x, y, clamp((xmax - xmin) / 1000, 0.01, 1 - x), clamp((ymax - ymin) / 1000, 0.01, 1 - y)];
+  // Vision models tend to return a box around the ink baseline rather than
+  // the full handwritten line. A small normalized margin keeps the overlay
+  // visibly attached to the complete answer without reaching neighboring work.
+  const padding = 0.015;
+  const left = clamp01(xmin / 1000 - padding);
+  const top = clamp01(ymin / 1000 - padding);
+  const right = clamp01(xmax / 1000 + padding);
+  const bottom = clamp01(ymax / 1000 + padding);
+  return [left, top, clamp(right - left, 0.01, 1 - left), clamp(bottom - top, 0.01, 1 - top)];
 }
 
 function regionsFor(block: RawBlock, pageCount: number): Array<{ page: number; bbox: BBox }> {
