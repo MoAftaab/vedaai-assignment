@@ -79,18 +79,21 @@ their page index, so multi-page answers highlight on the correct page.
 
 ## AI model & API
 
-The app uses **Gemini 2.5 Flash only**, through Google’s Generative Language API,
+The app uses **Gemini 2.5 Flash as the primary model**, through Google’s
+Generative Language API. If Gemini is unavailable, an optional Agent Router
+fallback can be enabled through environment variables. Both paths are
 implemented in [`src/server/llm/client.ts`](src/server/llm/client.ts):
 
 | Provider | Model | API shape |
 |---|---|---|---|
 | Google Gemini | `gemini-2.5-flash` | Generative Language `generateContent` |
-| Local fallback | deterministic | no network; used only when no key is configured |
+| Agent Router | configured model list | optional OpenAI-compatible / Anthropic-compatible fallback |
+| Local fallback | deterministic | no network; used only when no AI key is configured |
 
 - **Vision and text** use Gemini’s multimodal `generateContent` endpoint; mapping
   and grading receive the original answer-sheet images, not OCR text alone.
-- The response reports which `provider` actually served the request, and the
-  top bar shows a small telemetry chip.
+- The response reports which provider actually served the final request, and
+  the top bar explains when Agent Router fallback was used.
 - **All AI calls are server-side** (route handlers). API keys are read from
   environment variables and are **never** exposed to the browser.
 
@@ -110,7 +113,7 @@ implemented in [`src/server/llm/client.ts`](src/server/llm/client.ts):
 src/
   app/
     page.tsx              orchestrator: switches Upload / Loading / Result / Error
-    api/process/route.ts  the pipeline endpoint (Node runtime, maxDuration 60)
+    api/process/route.ts  the pipeline endpoint (Node runtime, maxDuration 120)
     api/health/route.ts   live provider health probe
   server/
     llm/client.ts         Gemini 2.5 Flash client
@@ -137,8 +140,11 @@ npm run dev
 Open http://localhost:3000 and drop in the files from [`samples/`](samples/).
 
 **Environment variables** (see [`.env.example`](.env.example)): only
-`GEMINI_API_KEY` is required for AI processing. The model is fixed to
-`gemini-2.5-flash` so deployment configuration cannot silently select another model.
+`GEMINI_API_KEY` is the primary AI credential. To enable fallback, also set
+`AGENT_ROUTER_API_KEY` and a comma-separated `AGENT_ROUTER_MODELS` list. The
+router base URL and protocol are configurable; `auto` uses Anthropic Messages
+for Claude model IDs and OpenAI Chat Completions for other model IDs. No model
+or key is hardcoded in application code.
 
 ---
 
@@ -152,9 +158,11 @@ commit real keys.
 1. Push to GitHub (done).
 2. [vercel.com](https://vercel.com) → **New Project** → import this repo.
    Next.js is auto-detected — no extra config needed.
-3. **Settings → Environment Variables:** add `GEMINI_API_KEY` (required). The
-   Gemini base URL is optional.
-4. **Deploy.** The `/api/process` function is configured for a 60s max duration.
+3. **Settings → Environment Variables:** add `GEMINI_API_KEY` (primary). Add
+   `AGENT_ROUTER_API_KEY`, `AGENT_ROUTER_BASE_URL`, `AGENT_ROUTER_API_FORMAT`,
+   and `AGENT_ROUTER_MODELS` when fallback is desired. The Gemini base URL is
+   optional.
+4. **Deploy.** The `/api/process` function is configured for a 120s max duration.
 
 Or via CLI: `vercel` then `vercel --prod`.
 

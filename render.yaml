@@ -1,7 +1,7 @@
 # Render Blueprint — deploys the Next.js app as a Node web service.
 #
 # In the Render dashboard:  New +  →  Blueprint  →  connect this repo.
-# Render reads this file, then prompts for the Gemini secret marked `sync: false`.
+# Render reads this file, then prompts for the AI secrets marked `sync: false`.
 services:
   - type: web
     name: vedaai-assignment
@@ -21,3 +21,11 @@ services:
       # Secrets — set in the Render dashboard, never committed.
       - key: GEMINI_API_KEY
         sync: false
+      - key: AGENT_ROUTER_API_KEY
+        sync: false
+      - key: AGENT_ROUTER_BASE_URL
+        value: https://co.agentrouter.org
+      - key: AGENT_ROUTER_API_FORMAT
+        value: auto
+      - key: AGENT_ROUTER_MODELS
+        value: claude-opus-4-8,claude-opus-5,glm-5.3,deepseek-v4-flash

@@ -28,6 +28,8 @@ for item in result.get("questions", []):
     answer = item.get("answer") or {}
     print(item["label"], item["status"], "regions=", len(answer.get("regions", [])), "confidence=", item.get("confidence"), "answer=", (answer.get("transcript") or "")[:55])
 print("unmatched:", len(result.get("unmatched", [])))
+if questions := {item["label"]: item for item in result.get("questions", [])}:
+    print("q6-debug:", json.dumps(questions.get("6", {}).get("answer", {}), ensure_ascii=False))
 
 # Regression assertions: this fixture is intentionally designed to catch the
 # exact failure where a misread handwritten label sends an answer to the wrong

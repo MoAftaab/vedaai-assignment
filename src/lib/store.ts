@@ -121,7 +121,7 @@ export const useStore = create<State>((set, get) => ({
       set({ progressStage: "grading", progressPercent: 80 });
 
       const controller = new AbortController();
-      const timeout = window.setTimeout(() => controller.abort(), 55_000);
+      const timeout = window.setTimeout(() => controller.abort(), 120_000);
       let res: Response;
       try {
         res = await fetch("/api/process", {

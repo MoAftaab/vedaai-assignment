@@ -67,7 +67,7 @@ export default function Topbar({ onOpenNav }: { onOpenNav?: () => void }) {
         <div className="absolute right-5 top-[60px] z-20 w-[min(320px,calc(100vw-2rem))] rounded-2xl bg-surface p-4 text-[13px] shadow-xl ring-1 ring-line">
           <p className="font-bold text-ink">{panel === "help" ? "How it works" : panel === "notifications" ? "Notifications" : "AI status"}</p>
           <p className="mt-1.5 leading-relaxed text-ink-70">
-            {panel === "help" ? "Upload a question paper and a handwritten answer sheet. Select a question to jump to its highlighted answer." : panel === "notifications" ? "You’re all caught up." : `Powered by Gemini 2.5 Flash${provider === "gemini" ? " · connected" : " · waiting for a key"}.`}
+            {panel === "help" ? "Upload a question paper and a handwritten answer sheet. Select a question to jump to its highlighted answer." : panel === "notifications" ? "You’re all caught up." : provider === "gemini" ? "Powered by Gemini 2.5 Flash · connected." : provider === "agent-router" ? "Gemini was unavailable; the configured Agent Router fallback completed this assessment." : "Configure an AI provider key to process assessments."}
           </p>
         </div>
       )}

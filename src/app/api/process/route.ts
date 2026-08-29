@@ -3,7 +3,7 @@ import type { ProcessRequest, ProcessResponse } from "@/lib/types";
 import { runPipeline } from "@/server/pipeline";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 120;
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
@@ -32,13 +32,15 @@ export async function POST(req: Request) {
     const result = await runPipeline(body);
     return NextResponse.json<ProcessResponse>({ ok: true, result });
   } catch (err) {
+    const error = err instanceof Error ? err.message : "Processing failed";
+    const status = /Gemini HTTP 429\b/.test(error) ? 429 : 500;
     return NextResponse.json<ProcessResponse>(
       {
         ok: false,
-        error: err instanceof Error ? err.message : "Processing failed",
+        error,
         stage: "pipeline",
       },
-      { status: 500 },
+      { status },
     );
   }
 }
