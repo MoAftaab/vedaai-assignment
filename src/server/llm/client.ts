@@ -14,9 +14,19 @@ const MAX_ROUTER_MODELS_PER_REQUEST = 3;
 
 interface ProviderResponse {
   candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-  choices?: Array<{ message?: { content?: string | Array<{ type?: string; text?: string }> } }>;
+  choices?: Array<{
+    message?: { content?: string | Array<{ type?: string; text?: string }> };
+    delta?: { content?: string | Array<{ type?: string; text?: string }> };
+    text?: string;
+  }>;
   content?: Array<{ type?: string; text?: string }>;
+  delta?: { text?: string };
+  text?: string;
   error?: { message?: string };
+  raw?: string;
+  data?: ProviderResponse | string;
+  response?: ProviderResponse | string;
+  output?: ProviderResponse | string;
 }
 
 class HttpError extends Error {
@@ -64,12 +74,48 @@ function routerRoot(): string {
   return withoutTrailingSlash(process.env.AGENT_ROUTER_BASE_URL ?? process.env.AGENTROUTER_BASE_URL ?? ROUTER_BASE_URL).replace(/\/v1$/, "");
 }
 
-function extractProviderText(data: ProviderResponse): string {
+function providerText(data: ProviderResponse): string {
   const geminiText = (data.candidates?.[0]?.content?.parts ?? []).map((part) => part.text ?? "").join("\n").trim();
   if (geminiText) return geminiText;
-  const content = data.choices?.[0]?.message?.content ?? data.content ?? "";
+  const choice = data.choices?.[0];
+  const content = choice?.message?.content ?? choice?.delta?.content ?? data.content ?? "";
+  const choiceText = choice?.text ?? data.delta?.text ?? data.text ?? "";
   const routerText = Array.isArray(content) ? content.map((part) => part.text ?? "").join("\n").trim() : String(content).trim();
-  if (routerText) return routerText;
+  if (routerText && routerText !== "undefined") return routerText;
+  if (choiceText) return choiceText.trim();
+  const nested = data.data ?? data.response ?? data.output;
+  if (typeof nested === "string") return nested.trim();
+  if (nested) {
+    const nestedText = providerText(nested);
+    if (nestedText) return nestedText;
+  }
+  return "";
+}
+
+function extractSseText(raw: string): string {
+  const chunks: string[] = [];
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line.trimStart().startsWith("data:")) continue;
+    const payload = line.slice(line.indexOf("data:") + 5).trim();
+    if (!payload || payload === "[DONE]") continue;
+    try {
+      const text = providerText(JSON.parse(payload) as ProviderResponse);
+      if (text) chunks.push(text);
+    } catch {
+      // Ignore non-JSON SSE comments/keep-alives; the caller can still use
+      // any ordinary text left in the response.
+    }
+  }
+  return chunks.join("").trim();
+}
+
+function extractProviderText(data: ProviderResponse): string {
+  const structuredText = providerText(data);
+  if (structuredText) return structuredText;
+  const streamText = data.raw ? extractSseText(data.raw) : "";
+  if (streamText) return streamText;
+  const rawText = data.raw?.trim() ?? "";
+  if (rawText) return rawText;
   throw new Error(data.error?.message || "AI provider returned no text");
 }
 
@@ -110,8 +156,13 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = REQU
 
 async function jsonBody(response: Response): Promise<ProviderResponse> {
   const body = await response.text();
-  try { return JSON.parse(body) as ProviderResponse; }
-  catch { throw new HttpError(response.status, `AI provider returned a non-JSON response (HTTP ${response.status})`); }
+  try {
+    const parsed = JSON.parse(body) as unknown;
+    if (typeof parsed === "string") return { raw: parsed };
+    if (parsed && typeof parsed === "object") return parsed as ProviderResponse;
+    return { raw: String(parsed) };
+  }
+  catch { return { raw: body }; }
 }
 
 class LLMClient {
@@ -148,7 +199,7 @@ class LLMClient {
       body: JSON.stringify({ contents: [{ role: "user", parts }], generationConfig: { temperature: 0, maxOutputTokens: maxTokens, responseMimeType: "application/json", ...(responseSchema ? { responseSchema } : {}) } }),
     });
     const data = await jsonBody(response);
-    if (!response.ok) throw new HttpError(response.status, `Gemini HTTP ${response.status}: ${data.error?.message ?? "request failed"}`);
+    if (!response.ok) throw new HttpError(response.status, `Gemini HTTP ${response.status}: ${data.error?.message ?? data.raw?.slice(0, 200) ?? "request failed"}`);
     return extractProviderText(data);
   }
 
@@ -187,7 +238,7 @@ class LLMClient {
         body: JSON.stringify({ model, max_tokens: maxTokens, temperature: 0, system: instructions, messages: [{ role: "user", content }] }),
       }, ROUTER_REQUEST_TIMEOUT_MS);
       const data = await jsonBody(response);
-      if (!response.ok) throw new HttpError(response.status, `Agent Router HTTP ${response.status} (${model}): ${data.error?.message ?? "request failed"}`);
+      if (!response.ok) throw new HttpError(response.status, `Agent Router HTTP ${response.status} (${model}): ${data.error?.message ?? data.raw?.slice(0, 200) ?? "request failed"}`);
       return extractProviderText(data);
     }
 
@@ -266,7 +317,7 @@ class LLMClient {
     if (!this.geminiKey) return { ok: false, status: 0, message: "No GEMINI_API_KEY configured" };
     try {
       const response = await fetchWithTimeout(this.geminiModelEndpoint(), { method: "GET" });
-      if (!response.ok) { const data = await jsonBody(response); return { ok: false, status: response.status, message: data.error?.message ?? "Gemini model probe failed" }; }
+      if (!response.ok) { const data = await jsonBody(response); return { ok: false, status: response.status, message: data.error?.message ?? data.raw?.slice(0, 200) ?? "Gemini model probe failed" }; }
       return { ok: true, status: response.status, message: "OK" };
     } catch (error) { return { ok: false, status: error instanceof HttpError ? error.status : 0, message: error instanceof Error ? error.message : String(error) }; }
   }
@@ -284,7 +335,7 @@ class LLMClient {
           "x-app": "cli",
         },
       });
-      if (!response.ok) { const data = await jsonBody(response); return { ok: false, status: response.status, message: data.error?.message ?? "Agent Router model probe failed" }; }
+      if (!response.ok) { const data = await jsonBody(response); return { ok: false, status: response.status, message: data.error?.message ?? data.raw?.slice(0, 200) ?? "Agent Router model probe failed" }; }
       return { ok: true, status: response.status, message: `Configured models: ${models.join(", ")}` };
     } catch (error) { return { ok: false, status: error instanceof HttpError ? error.status : 0, message: error instanceof Error ? error.message : String(error) }; }
   }
